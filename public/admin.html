@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - Session Manager</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 20px 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+        }
+
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .refresh-btn:hover {
+            background: #5568d3;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .stat-card h3 {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .stat-card .value {
+            color: #333;
+            font-size: 32px;
+            font-weight: bold;
+        }
+
+        .main-content {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .sessions-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sessions-header h2 {
+            color: #333;
+            font-size: 20px;
+        }
+
+        .session-count {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .sessions-list {
+            max-height: calc(100vh - 400px);
+            overflow-y: auto;
+        }
+
+        .session-item {
+            padding: 20px 30px;
+            border-bottom: 1px solid #f0f0f0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .session-item:hover {
+            background: #f9f9f9;
+        }
+
+        .session-item.expanded {
+            background: #f5f7ff;
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .session-info {
+            flex: 1;
+        }
+
+        .session-id {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .session-meta {
+            display: flex;
+            gap: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .session-meta span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge-stage {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-view {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-view:hover {
+            background: #5568d3;
+        }
+
+        .btn-delete {
+            background: #ff4444;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #cc0000;
+        }
+
+        .session-details {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .session-details.visible {
+            display: block;
+        }
+
+        .detail-section {
+            margin-bottom: 20px;
+        }
+
+        .detail-section h4 {
+            color: #333;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+
+        .participants-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .participant-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px;
+            background: #f9f9f9;
+            border-radius: 6px;
+        }
+
+        .participant-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .participant-name {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .participant-phone {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .participant-role {
+            font-size: 12px;
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .role-creator {
+            background: #ffd54f;
+            color: #f57f17;
+        }
+
+        .role-friend {
+            background: #81c784;
+            color: #2e7d32;
+        }
+
+        .messages-container {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 12px;
+            border-radius: 8px;
+        }
+
+        .message.user {
+            background: #e3f2fd;
+            border-left: 3px solid #1976d2;
+        }
+
+        .message.assistant {
+            background: #f3e5f5;
+            border-left: 3px solid #7b1fa2;
+        }
+
+        .message-role {
+            font-weight: bold;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+            color: #666;
+        }
+
+        .message-content {
+            color: #333;
+            white-space: pre-wrap;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.visible {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+        }
+
+        .modal-header {
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            color: #333;
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .modal-body {
+            margin-bottom: 20px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .btn-cancel {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-cancel:hover {
+            background: #d0d0d0;
+        }
+
+        .btn-confirm {
+            background: #ff4444;
+            color: white;
+        }
+
+        .btn-confirm:hover {
+            background: #cc0000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Admin Dashboard - Session Manager</h1>
+            <button class="refresh-btn" onclick="loadData()">🔄 Refresh</button>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <h3>Total Sessions</h3>
+                <div class="value" id="statTotalSessions">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Participants</h3>
+                <div class="value" id="statTotalParticipants">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Messages</h3>
+                <div class="value" id="statTotalMessages">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Avg Participants/Session</h3>
+                <div class="value" id="statAvgParticipants">-</div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <div class="sessions-header">
+                <h2>Active Sessions</h2>
+                <span class="session-count" id="sessionCount">0 sessions</span>
+            </div>
+            <div class="sessions-list" id="sessionsList">
+                <div class="loading">Loading sessions...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="deleteModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚠️ Delete Session</h3>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete session <strong id="deleteSessionId"></strong>?</p>
+                <p>This will remove all conversation data and participant mappings. This action cannot be undone.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-cancel" onclick="closeDeleteModal()">Cancel</button>
+                <button class="btn btn-confirm" onclick="confirmDelete()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let sessions = [];
+        let expandedSession = null;
+        let sessionToDelete = null;
+
+        async function loadData() {
+            await Promise.all([loadStats(), loadSessions()]);
+        }
+
+        async function loadStats() {
+            try {
+                const response = await fetch('/admin/api/stats');
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('statTotalSessions').textContent = data.stats.totalSessions;
+                    document.getElementById('statTotalParticipants').textContent = data.stats.totalParticipants;
+                    document.getElementById('statTotalMessages').textContent = data.stats.totalMessages;
+                    document.getElementById('statAvgParticipants').textContent = data.stats.averageParticipantsPerSession;
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/admin/api/sessions');
+                const data = await response.json();
+
+                if (data.success) {
+                    sessions = data.sessions;
+                    renderSessions();
+                }
+            } catch (error) {
+                console.error('Error loading sessions:', error);
+                document.getElementById('sessionsList').innerHTML = `
+                    <div class="empty-state">
+                        <p>Error loading sessions. Please try again.</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderSessions() {
+            const listEl = document.getElementById('sessionsList');
+            const countEl = document.getElementById('sessionCount');
+
+            countEl.textContent = `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+
+            if (sessions.length === 0) {
+                listEl.innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                        </svg>
+                        <p>No active sessions</p>
+                    </div>
+                `;
+                return;
+            }
+
+            listEl.innerHTML = sessions.map(session => `
+                <div class="session-item ${expandedSession === session.sessionId ? 'expanded' : ''}" id="session-${session.sessionId}">
+                    <div class="session-header">
+                        <div class="session-info">
+                            <div class="session-id">${session.sessionId}</div>
+                            <div class="session-meta">
+                                <span>👥 ${session.participantCount} participant${session.participantCount !== 1 ? 's' : ''}</span>
+                                <span>💬 ${session.messageCount} message${session.messageCount !== 1 ? 's' : ''}</span>
+                                <span>📅 ${new Date(session.createdAt).toLocaleDateString()}</span>
+                                <span class="badge badge-stage">${formatStage(session.stage)}</span>
+                            </div>
+                        </div>
+                        <div class="session-actions">
+                            <button class="btn btn-view" onclick="toggleSession('${session.sessionId}')">
+                                ${expandedSession === session.sessionId ? 'Hide' : 'View'}
+                            </button>
+                            <button class="btn btn-delete" onclick="openDeleteModal('${session.sessionId}')">🗑️ Delete</button>
+                        </div>
+                    </div>
+                    <div class="session-details ${expandedSession === session.sessionId ? 'visible' : ''}" id="details-${session.sessionId}">
+                        <div class="loading">Loading details...</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function toggleSession(sessionId) {
+            if (expandedSession === sessionId) {
+                expandedSession = null;
+                renderSessions();
+            } else {
+                expandedSession = sessionId;
+                renderSessions();
+                await loadSessionDetails(sessionId);
+            }
+        }
+
+        async function loadSessionDetails(sessionId) {
+            const detailsEl = document.getElementById(`details-${sessionId}`);
+
+            try {
+                const response = await fetch(`/admin/api/sessions/${sessionId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    const session = data.session;
+                    detailsEl.innerHTML = `
+                        <div class="detail-section">
+                            <h4>Participants</h4>
+                            <div class="participants-list">
+                                ${session.participants.map(p => `
+                                    <div class="participant-item">
+                                        <div class="participant-info">
+                                            <span class="participant-name">${p.name}</span>
+                                            <span class="participant-phone">${p.phoneNumber}</span>
+                                        </div>
+                                        <span class="participant-role role-${p.role}">${p.role}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+
+                        ${session.primaryUser ? `
+                            <div class="detail-section">
+                                <h4>Primary User</h4>
+                                <div class="participant-item">
+                                    <div class="participant-info">
+                                        <span class="participant-name">${session.primaryUser.name}</span>
+                                        <span class="participant-phone">${session.primaryUser.phoneNumber}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        <div class="detail-section">
+                            <h4>Conversation (${session.messages.length} messages)</h4>
+                            <div class="messages-container">
+                                ${session.messages.length > 0 ? session.messages.map(msg => `
+                                    <div class="message ${msg.role}">
+                                        <div class="message-role">${msg.role}</div>
+                                        <div class="message-content">${msg.content}</div>
+                                    </div>
+                                `).join('') : '<p style="color: #999; text-align: center;">No messages yet</p>'}
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                console.error('Error loading session details:', error);
+                detailsEl.innerHTML = '<p style="color: red; text-align: center;">Error loading details</p>';
+            }
+        }
+
+        function openDeleteModal(sessionId) {
+            sessionToDelete = sessionId;
+            document.getElementById('deleteSessionId').textContent = sessionId;
+            document.getElementById('deleteModal').classList.add('visible');
+        }
+
+        function closeDeleteModal() {
+            sessionToDelete = null;
+            document.getElementById('deleteModal').classList.remove('visible');
+        }
+
+        async function confirmDelete() {
+            if (!sessionToDelete) return;
+
+            try {
+                const response = await fetch(`/admin/api/sessions/${sessionToDelete}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    closeDeleteModal();
+                    await loadData();
+                } else {
+                    alert('Error deleting session: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error deleting session:', error);
+                alert('Error deleting session. Please try again.');
+            }
+        }
+
+        function formatStage(stage) {
+            return stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        }
+
+        // Load data on page load
+        loadData();
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadData, 30000);
+    </script>
+</body>
+</html>

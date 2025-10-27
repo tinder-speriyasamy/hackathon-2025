@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Matchmaker Group Chat - Testing Interface</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #f0f2f5;
+      display: flex;
+      height: 100vh;
+    }
+
+    /* Sidebar for conversations */
+    .sidebar {
+      width: 300px;
+      background: white;
+      border-right: 1px solid #e0e0e0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar-header {
+      padding: 15px;
+      background: #075e54;
+      color: white;
+      font-weight: 600;
+    }
+
+    .conversation-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .conversation-item {
+      padding: 12px 15px;
+      border-bottom: 1px solid #f0f0f0;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .conversation-item:hover {
+      background: #f5f5f5;
+    }
+
+    .conversation-item.active {
+      background: #e7f3f0;
+    }
+
+    .conversation-name {
+      font-weight: 600;
+      margin-bottom: 3px;
+    }
+
+    .conversation-preview {
+      font-size: 13px;
+      color: #667781;
+    }
+
+    /* Main chat area */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #e5ddd5;
+    }
+
+    .chat-header {
+      background: #075e54;
+      color: white;
+      padding: 15px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .chat-info {
+      flex: 1;
+    }
+
+    .chat-title {
+      font-weight: 600;
+      font-size: 16px;
+    }
+
+    .chat-subtitle {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-top: 2px;
+    }
+
+    .phone-input-container {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .phone-input-container input {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      width: 180px;
+    }
+
+    .phone-input-container button {
+      padding: 8px 16px;
+      background: #25d366;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .phone-input-container button:hover {
+      background: #20ba5a;
+    }
+
+    /* Messages area */
+    .messages-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background-image: url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyJpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuMy1jMDExIDY2LjE0NTY2MSwgMjAxMi8wMi8wNi0xNDo1NjoyNyAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENTNiAoTWFjaW50b3NoKSIgeG1wTU06SW5zdGFuY2VJRD0ieG1wLmlpZDpBRTZCN0VGNjM3NzkxMUUyQjcyQkEwRDhGQjZGRkYxRCIgeG1wTU06RG9jdW1lbnRJRD0ieG1wLmRpZDpBRTZCN0VGNzM3NzkxMUUyQjcyQkEwRDhGQjZGRkYxRCI+IDx4bXBNTTpEZXJpdmVkRnJvbSBzdFJlZjppbnN0YW5jZUlEPSJ4bXAuaWlkOkFFNkI3RUY0Mzc3OTExRTJCNzJCQTBEOEZCNkZGRjFEIiBzdFJlZjpkb2N1bWVudElEPSJ4bXAuZGlkOkFFNkI3RUY1Mzc3OTExRTJCNzJCQTBEOEZCNkZGRjFEIi8+IDwvcmRmOkRlc2NyaXB0aW9uPiA8L3JkZjpSREY+IDwveDp4bXBtZXRhPiA8P3hwYWNrZXQgZW5kPSJyIj8+TQBuqAAAABRJREFUeNpiYGBgYGAgEjBiMBQBBBgA+AAAX/0fhQAAAABJRU5ErkJggg==');
+    }
+
+    .message {
+      margin-bottom: 15px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .message-header {
+      font-size: 12px;
+      color: #667781;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sender-name {
+      font-weight: 600;
+    }
+
+    .message-time {
+      font-size: 11px;
+    }
+
+    .message-bubble {
+      max-width: 65%;
+      padding: 8px 12px;
+      border-radius: 8px;
+      word-wrap: break-word;
+      box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+    }
+
+    .message.user .message-bubble {
+      background: #dcf8c6;
+      align-self: flex-end;
+      margin-left: auto;
+    }
+
+    .message.ai .message-bubble {
+      background: white;
+      align-self: flex-start;
+    }
+
+    .message.friend .message-bubble {
+      background: #fff3cd;
+      align-self: flex-start;
+    }
+
+    .message-photo {
+      max-width: 100%;
+      border-radius: 8px;
+      margin-top: 5px;
+      cursor: pointer;
+    }
+
+    .message-metadata {
+      font-size: 10px;
+      color: #999;
+      margin-top: 2px;
+      text-align: right;
+    }
+
+    /* Input area */
+    .input-container {
+      background: white;
+      padding: 10px 20px;
+      border-top: 1px solid #e0e0e0;
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .message-input {
+      flex: 1;
+      padding: 10px 15px;
+      border: 1px solid #e0e0e0;
+      border-radius: 24px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      max-height: 120px;
+      min-height: 42px;
+    }
+
+    .message-input:focus {
+      outline: none;
+      border-color: #25d366;
+    }
+
+    .input-button {
+      padding: 10px 16px;
+      background: #075e54;
+      color: white;
+      border: none;
+      border-radius: 24px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.2s;
+      white-space: nowrap;
+    }
+
+    .input-button:hover {
+      background: #064d45;
+    }
+
+    .input-button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .photo-upload-btn {
+      background: #25d366;
+    }
+
+    .photo-upload-btn:hover {
+      background: #20ba5a;
+    }
+
+    #photoInput {
+      display: none;
+    }
+
+    .photo-preview {
+      max-width: 200px;
+      margin: 10px 0;
+      border-radius: 8px;
+      border: 2px solid #25d366;
+    }
+
+    .participants-section {
+      padding: 15px;
+      background: #f9f9f9;
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    .participants-title {
+      font-size: 12px;
+      color: #667781;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    .participant-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .participant-chip {
+      padding: 4px 10px;
+      background: white;
+      border-radius: 12px;
+      font-size: 12px;
+      border: 1px solid #e0e0e0;
+    }
+
+    .status-message {
+      padding: 8px 15px;
+      background: #fff9c4;
+      border-left: 3px solid #fbc02d;
+      margin: 10px 0;
+      font-size: 13px;
+    }
+
+    .loading {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      Conversations
+    </div>
+    <div class="conversation-list" id="conversationList">
+      <!-- Conversations will be populated here -->
+    </div>
+  </div>
+
+  <!-- Main Chat -->
+  <div class="chat-container">
+    <!-- Header -->
+    <div class="chat-header">
+      <div class="chat-info">
+        <div class="chat-title" id="chatTitle">AI Matchmaker Group Chat</div>
+        <div class="chat-subtitle" id="chatSubtitle">Testing Interface</div>
+      </div>
+      <div class="phone-input-container">
+        <input
+          type="tel"
+          id="phoneNumberInput"
+          placeholder="+19193087138"
+          value="+19193087138"
+        />
+        <button onclick="connectToConversation()">Connect</button>
+      </div>
+    </div>
+
+    <!-- Participants -->
+    <div class="participants-section">
+      <div class="participants-title">GROUP PARTICIPANTS</div>
+      <div class="participant-chips" id="participantsContainer">
+        <div class="participant-chip">👤 You</div>
+        <div class="participant-chip">👥 Friend 1</div>
+        <div class="participant-chip">👥 Friend 2</div>
+        <div class="participant-chip">🤖 AI Matchmaker</div>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="messages-container" id="messagesContainer">
+      <div class="status-message">
+        💡 <strong>Group Chat Testing Mode</strong><br>
+        Enter your phone number above and click "Connect" to sync with your WhatsApp conversation.
+        Upload photos and test the full experience!
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div class="input-container">
+      <input type="file" id="photoInput" accept="image/*" onchange="handlePhotoSelect(event)">
+      <button class="input-button photo-upload-btn" onclick="document.getElementById('photoInput').click()">
+        📷 Photo
+      </button>
+      <textarea
+        id="messageInput"
+        class="message-input"
+        placeholder="Type a message..."
+        rows="1"
+        onkeypress="handleKeyPress(event)"
+      ></textarea>
+      <button class="input-button" onclick="sendMessage()" id="sendButton">
+        Send
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // State management
+    let currentPhoneNumber = '+19193087138';
+    let selectedPhotoUrl = null;
+    let conversations = {};
+
+    // Load conversations from localStorage
+    function loadConversations() {
+      const saved = localStorage.getItem('conversations');
+      if (saved) {
+        conversations = JSON.parse(saved);
+        updateConversationList();
+      }
+    }
+
+    // Save conversations to localStorage
+    function saveConversations() {
+      localStorage.setItem('conversations', JSON.stringify(conversations));
+      updateConversationList();
+    }
+
+    // Update conversation list in sidebar
+    function updateConversationList() {
+      const list = document.getElementById('conversationList');
+      list.innerHTML = '';
+
+      Object.keys(conversations).forEach(phone => {
+        const conv = conversations[phone];
+        const item = document.createElement('div');
+        item.className = 'conversation-item' + (phone === currentPhoneNumber ? ' active' : '');
+        item.onclick = () => switchConversation(phone);
+
+        const lastMessage = conv.messages[conv.messages.length - 1];
+        const preview = lastMessage ? lastMessage.text.substring(0, 30) + '...' : 'No messages';
+
+        item.innerHTML = `
+          <div class="conversation-name">${phone}</div>
+          <div class="conversation-preview">${preview}</div>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    // Switch to a different conversation
+    function switchConversation(phone) {
+      currentPhoneNumber = phone;
+      document.getElementById('phoneNumberInput').value = phone;
+      loadMessages();
+      updateConversationList();
+    }
+
+    // Connect to conversation
+    async function connectToConversation() {
+      const phone = document.getElementById('phoneNumberInput').value.trim();
+      if (!phone) {
+        alert('Please enter a phone number');
+        return;
+      }
+
+      currentPhoneNumber = phone;
+
+      if (!conversations[phone]) {
+        conversations[phone] = {
+          phoneNumber: phone,
+          messages: [],
+          createdAt: new Date().toISOString()
+        };
+        saveConversations();
+      }
+
+      // Try to fetch existing conversation from server
+      try {
+        const response = await fetch(`/api/conversation/${encodeURIComponent(phone)}`);
+        if (response.ok) {
+          const data = await response.json();
+          document.getElementById('chatSubtitle').innerText = `Connected to ${phone} | ${data.state.messages.length} messages in history`;
+        }
+      } catch (error) {
+        console.error('Error fetching conversation:', error);
+      }
+
+      loadMessages();
+      updateConversationList();
+    }
+
+    // Load messages for current conversation
+    function loadMessages() {
+      const container = document.getElementById('messagesContainer');
+      container.innerHTML = '';
+
+      if (!conversations[currentPhoneNumber]) {
+        return;
+      }
+
+      const conv = conversations[currentPhoneNumber];
+      conv.messages.forEach(msg => {
+        appendMessageToUI(msg);
+      });
+
+      // Scroll to bottom
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Append message to UI
+    function appendMessageToUI(msg) {
+      const container = document.getElementById('messagesContainer');
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `message ${msg.sender}`;
+
+      const time = new Date(msg.timestamp).toLocaleTimeString();
+
+      let senderName = 'Unknown';
+      if (msg.sender === 'user') senderName = 'You';
+      else if (msg.sender === 'ai') senderName = '🤖 AI Matchmaker';
+      else if (msg.sender === 'friend') senderName = `👥 ${msg.friendName || 'Friend'}`;
+
+      let photoHtml = '';
+      if (msg.photoUrl) {
+        photoHtml = `<img src="${msg.photoUrl}" class="message-photo" onclick="window.open('${msg.photoUrl}', '_blank')">`;
+      }
+
+      messageDiv.innerHTML = `
+        <div class="message-header">
+          <span class="sender-name">${senderName}</span>
+          <span class="message-time">${time}</span>
+        </div>
+        <div class="message-bubble">
+          ${msg.text}
+          ${photoHtml}
+          <div class="message-metadata">${msg.metadata || ''}</div>
+        </div>
+      `;
+
+      container.appendChild(messageDiv);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Handle photo selection
+    function handlePhotoSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      // Show preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const preview = document.createElement('img');
+        preview.src = e.target.result;
+        preview.className = 'photo-preview';
+        preview.onclick = () => preview.remove();
+        document.getElementById('messageInput').parentElement.insertBefore(
+          preview,
+          document.getElementById('messageInput')
+        );
+      };
+      reader.readAsDataURL(file);
+
+      // Upload to server
+      uploadPhoto(file);
+    }
+
+    // Upload photo to server
+    async function uploadPhoto(file) {
+      const formData = new FormData();
+      formData.append('photo', file);
+
+      try {
+        const response = await fetch('/api/upload-photo', {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await response.json();
+        if (data.success) {
+          selectedPhotoUrl = data.url;
+          console.log('Photo uploaded:', selectedPhotoUrl);
+        }
+      } catch (error) {
+        console.error('Error uploading photo:', error);
+        alert('Failed to upload photo');
+      }
+    }
+
+    // Send message
+    async function sendMessage() {
+      const input = document.getElementById('messageInput');
+      const message = input.value.trim();
+
+      if (!message) return;
+
+      const sendButton = document.getElementById('sendButton');
+      sendButton.disabled = true;
+      sendButton.textContent = 'Sending...';
+
+      // Add user message to UI
+      const userMsg = {
+        sender: 'user',
+        text: message,
+        photoUrl: selectedPhotoUrl,
+        timestamp: new Date().toISOString(),
+        metadata: selectedPhotoUrl ? '📷 Photo attached' : ''
+      };
+
+      if (!conversations[currentPhoneNumber]) {
+        conversations[currentPhoneNumber] = {
+          phoneNumber: currentPhoneNumber,
+          messages: [],
+          createdAt: new Date().toISOString()
+        };
+      }
+
+      conversations[currentPhoneNumber].messages.push(userMsg);
+      saveConversations();
+      appendMessageToUI(userMsg);
+
+      // Clear input
+      input.value = '';
+
+      // Remove photo preview
+      const preview = document.querySelector('.photo-preview');
+      if (preview) preview.remove();
+
+      // Send to server
+      try {
+        const response = await fetch('/api/send-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            phoneNumber: currentPhoneNumber,
+            message: message,
+            photoUrl: selectedPhotoUrl
+          })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          // Add AI response to UI
+          const aiMsg = {
+            sender: 'ai',
+            text: data.aiResponse.message,
+            timestamp: data.aiResponse.timestamp,
+            metadata: `Server response | ${data.conversationState.messages.length} total messages`
+          };
+
+          conversations[currentPhoneNumber].messages.push(aiMsg);
+          saveConversations();
+          appendMessageToUI(aiMsg);
+        }
+      } catch (error) {
+        console.error('Error sending message:', error);
+        alert('Failed to send message');
+      }
+
+      selectedPhotoUrl = null;
+      sendButton.disabled = false;
+      sendButton.textContent = 'Send';
+    }
+
+    // Handle Enter key
+    function handleKeyPress(event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage();
+      }
+    }
+
+    // Initialize
+    window.onload = () => {
+      loadConversations();
+      connectToConversation();
+    };
+  </script>
+</body>
+</html>
