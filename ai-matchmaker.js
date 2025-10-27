@@ -17,6 +17,7 @@
 const OpenAI = require('openai');
 const logger = require('./logger');
 const redis = require('redis');
+const conversationManager = require('./conversation-manager');
 const {
   STAGES,
   ACTION_TYPES,
@@ -217,6 +218,7 @@ async function createSession(creatorPhone, creatorName) {
     sessionId: sessionId,
     createdAt: new Date().toISOString(),
     createdBy: creatorPhone,
+    conversationSid: null, // Twilio Conversation SID
     participants: [
       { phoneNumber: creatorPhone, name: creatorName, joinedAt: new Date().toISOString(), role: 'creator' }
     ],
@@ -230,6 +232,39 @@ async function createSession(creatorPhone, creatorName) {
     messages: [], // Conversation history for OpenAI
     actions: [] // History of actions taken by AI
   };
+
+  // Create Twilio Conversation for real group chat
+  try {
+    const conversation = await conversationManager.createConversation(sessionId, {
+      creatorPhone,
+      creatorName
+    });
+
+    sessionData.conversationSid = conversation.sid;
+
+    logger.info('Created Twilio Conversation for session', {
+      sessionId,
+      conversationSid: conversation.sid
+    });
+
+    // Add creator as first participant to the conversation
+    await conversationManager.addParticipant(
+      conversation.sid,
+      creatorPhone
+    );
+
+    logger.info('Added creator to Twilio Conversation', {
+      sessionId,
+      conversationSid: conversation.sid,
+      creatorPhone
+    });
+  } catch (error) {
+    logger.error('Failed to create Twilio Conversation', {
+      sessionId,
+      error: error.message
+    });
+    // Continue without Conversation - will fall back to manual broadcast
+  }
 
   await setSession(sessionId, sessionData);
   await setPhoneMapping(creatorPhone, sessionId);
@@ -265,6 +300,31 @@ async function joinSession(sessionId, phoneNumber, name) {
     joinedAt: new Date().toISOString(),
     role: 'friend'
   });
+
+  // Add participant to Twilio Conversation (if exists)
+  if (session.conversationSid) {
+    try {
+      await conversationManager.addParticipant(
+        session.conversationSid,
+        phoneNumber
+      );
+
+      logger.info('Added participant to Twilio Conversation', {
+        sessionId,
+        conversationSid: session.conversationSid,
+        phoneNumber,
+        name
+      });
+    } catch (error) {
+      logger.error('Failed to add participant to Twilio Conversation', {
+        sessionId,
+        conversationSid: session.conversationSid,
+        phoneNumber,
+        error: error.message
+      });
+      // Continue without Conversation - will fall back to manual broadcast
+    }
+  }
 
   await setSession(sessionId, session);
   await setPhoneMapping(phoneNumber, sessionId);
@@ -442,16 +502,41 @@ async function handleMessage(from, message, profileName = null, mediaUrls = []) 
 
 You've joined session ${sessionId}. There are now ${session.participants.length} people helping create this profile!`;
 
+      // Send via Conversations API if available
+      if (session.conversationSid) {
+        try {
+          const formattedResponse = `*MeetCute:* ${response}`;
+          await conversationManager.sendMessage(
+            session.conversationSid,
+            'MeetCute',
+            formattedResponse
+          );
+          return {
+            response,
+            sessionId,
+            participants: session.participants.map(p => p.phoneNumber),
+            sentViaConversations: true
+          };
+        } catch (error) {
+          logger.error('Failed to send join message via Conversations', {
+            sessionId,
+            error: error.message
+          });
+        }
+      }
+
       return {
         response,
         sessionId,
-        participants: session.participants.map(p => p.phoneNumber)
+        participants: session.participants.map(p => p.phoneNumber),
+        sentViaConversations: false
       };
     } else {
       return {
         response: `Hmm, I couldn't find session "${sessionId}". Double check the code and try again!`,
         sessionId: null,
-        participants: [phoneNumber]
+        participants: [phoneNumber],
+        sentViaConversations: false
       };
     }
   }
@@ -477,10 +562,34 @@ Ready to start? Who are we creating this profile for today?`;
 
     await saveMessage(sessionId, 'assistant', welcomeMessage);
 
+    // Send via Conversations API if available
+    if (session.conversationSid) {
+      try {
+        const formattedMessage = `*MeetCute:* ${welcomeMessage}`;
+        await conversationManager.sendMessage(
+          session.conversationSid,
+          'MeetCute',
+          formattedMessage
+        );
+        return {
+          response: welcomeMessage,
+          sessionId,
+          participants: session.participants.map(p => p.phoneNumber),
+          sentViaConversations: true
+        };
+      } catch (error) {
+        logger.error('Failed to send welcome message via Conversations', {
+          sessionId,
+          error: error.message
+        });
+      }
+    }
+
     return {
       response: welcomeMessage,
       sessionId,
-      participants: session.participants.map(p => p.phoneNumber)
+      participants: session.participants.map(p => p.phoneNumber),
+      sentViaConversations: false
     };
   }
 
@@ -502,8 +611,7 @@ Ready to start? Who are we creating this profile for today?`;
 
   // Handle "help" command
   if (lowerMessage === 'help') {
-    return {
-      response: `Here's how this works:
+    const helpMessage = `Here's how this works:
 
 📱 Session Code: ${sessionId}
 👥 ${session.participants.length} people in session
@@ -511,9 +619,36 @@ Ready to start? Who are we creating this profile for today?`;
 👥 Friends can join with: *join ${sessionId}*
 ✨ I'll help create an authentic profile
 
-Type your answer to keep chatting!`,
+Type your answer to keep chatting!`;
+
+    // Send via Conversations API if available
+    if (session.conversationSid) {
+      try {
+        const formattedMessage = `*MeetCute:* ${helpMessage}`;
+        await conversationManager.sendMessage(
+          session.conversationSid,
+          'MeetCute',
+          formattedMessage
+        );
+        return {
+          response: helpMessage,
+          sessionId,
+          participants: session.participants.map(p => p.phoneNumber),
+          sentViaConversations: true
+        };
+      } catch (error) {
+        logger.error('Failed to send help message via Conversations', {
+          sessionId,
+          error: error.message
+        });
+      }
+    }
+
+    return {
+      response: helpMessage,
       sessionId,
-      participants: session.participants.map(p => p.phoneNumber)
+      participants: session.participants.map(p => p.phoneNumber),
+      sentViaConversations: false
     };
   }
 
@@ -533,11 +668,61 @@ Who are we creating this profile for today?`;
 
     await saveMessage(newSessionId, 'assistant', welcomeMessage);
 
+    // Send via Conversations API if available
+    if (newSession.conversationSid) {
+      try {
+        const formattedMessage = `*MeetCute:* ${welcomeMessage}`;
+        await conversationManager.sendMessage(
+          newSession.conversationSid,
+          'MeetCute',
+          formattedMessage
+        );
+        return {
+          response: welcomeMessage,
+          sessionId: newSessionId,
+          participants: newSession.participants.map(p => p.phoneNumber),
+          sentViaConversations: true
+        };
+      } catch (error) {
+        logger.error('Failed to send restart message via Conversations', {
+          sessionId: newSessionId,
+          error: error.message
+        });
+      }
+    }
+
     return {
       response: welcomeMessage,
       sessionId: newSessionId,
-      participants: newSession.participants.map(p => p.phoneNumber)
+      participants: newSession.participants.map(p => p.phoneNumber),
+      sentViaConversations: false
     };
+  }
+
+  // Add user's message to Conversation (so other participants see it)
+  // WhatsApp doesn't display author metadata, so prepend name to message body
+  if (session.conversationSid) {
+    try {
+      const authorName = profileName || phoneNumber;
+      const formattedMessage = `*${authorName}:* ${message}`;
+
+      await conversationManager.sendMessage(
+        session.conversationSid,
+        authorName, // Use their name as author (metadata)
+        formattedMessage // Include author in message body for WhatsApp
+      );
+
+      logger.info('Added user message to Conversation', {
+        sessionId,
+        conversationSid: session.conversationSid,
+        author: authorName
+      });
+    } catch (error) {
+      logger.error('Failed to add user message to Conversation', {
+        sessionId,
+        error: error.message
+      });
+    }
   }
 
   // Handle normal conversation flow with AI + Actions
@@ -582,12 +767,52 @@ Who are we creating this profile for today?`;
   // Re-fetch session to get latest state
   const updatedSession = await getSessionData(sessionId);
 
+  // Send AI response via Conversations API (if available)
+  // Twilio will automatically broadcast to all participants
+  if (updatedSession && updatedSession.conversationSid && aiResult.message) {
+    try {
+      // Format AI message with author prefix for WhatsApp
+      const formattedAIMessage = `*MeetCute:* ${aiResult.message}`;
+
+      await conversationManager.sendMessage(
+        updatedSession.conversationSid,
+        'MeetCute', // Author name as specified
+        formattedAIMessage
+      );
+
+      logger.info('Sent AI response via Conversations API', {
+        sessionId,
+        conversationSid: updatedSession.conversationSid,
+        responseLength: aiResult.message.length
+      });
+
+      // Mark that we used Conversations API
+      return {
+        response: aiResult.message,
+        sessionId,
+        participants: updatedSession.participants.map(p => p.phoneNumber),
+        actions: aiResult.actions || [],
+        reasoning: aiResult.reasoning,
+        sentViaConversations: true // Indicates response already sent
+      };
+    } catch (error) {
+      logger.error('Failed to send via Conversations API, falling back to manual broadcast', {
+        sessionId,
+        conversationSid: updatedSession.conversationSid,
+        error: error.message
+      });
+      // Fall through to return normally for manual broadcast
+    }
+  }
+
+  // Fallback: return for manual broadcast (old behavior)
   return {
     response: aiResult.message,
     sessionId,
     participants: updatedSession ? updatedSession.participants.map(p => p.phoneNumber) : [],
     actions: aiResult.actions || [],
-    reasoning: aiResult.reasoning
+    reasoning: aiResult.reasoning,
+    sentViaConversations: false // Indicates needs manual broadcast
   };
 }
 

@@ -22,6 +22,7 @@ const fs = require('fs');
 const logger = require('./logger');
 const aiMatchmaker = require('./ai-matchmaker');
 const adminRoutes = require('./admin-routes');
+const conversationManager = require('./conversation-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -63,12 +64,20 @@ const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER; // e.g., whatsapp:+14155238886
+const TWILIO_CONVERSATIONS_SID = process.env.TWILIO_CONVERSATIONS_SID; // Conversations Service SID (starts with IS)
 
 // Initialize Twilio client (only if credentials are set)
 let twilioClient = null;
 if (TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN) {
   twilioClient = twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
   logger.info('Twilio client initialized');
+
+  // Initialize Conversation Manager
+  if (TWILIO_WHATSAPP_NUMBER) {
+    conversationManager.initialize(twilioClient, TWILIO_WHATSAPP_NUMBER, TWILIO_CONVERSATIONS_SID);
+  } else {
+    logger.warn('TWILIO_WHATSAPP_NUMBER not set - Conversations API will not work');
+  }
 } else {
   logger.warn('Twilio credentials not set - some features will be disabled');
 }
@@ -250,10 +259,22 @@ app.post('/webhooks/sms', async (req, res) => {
         from: req.body.From,
         sessionId: result.sessionId,
         responseLength: result.response.length,
-        participantCount: result.participants.length
+        participantCount: result.participants.length,
+        sentViaConversations: result.sentViaConversations || false
       });
 
-      // Send response to original sender via TwiML
+      // If message was already sent via Conversations API, just acknowledge
+      if (result.sentViaConversations) {
+        logger.info('Message already sent via Conversations API, skipping manual broadcast', {
+          sessionId: result.sessionId
+        });
+        // Send empty TwiML response (no duplicate message to sender)
+        res.type('text/xml');
+        res.send(twiml.toString());
+        return;
+      }
+
+      // Fallback: Send response to original sender via TwiML
       twiml.message(result.response);
 
       // Broadcast to all other participants in the session (async, don't wait)
@@ -261,7 +282,7 @@ app.post('/webhooks/sms', async (req, res) => {
       const otherParticipants = result.participants.filter(p => p !== senderPhone);
 
       if (otherParticipants.length > 0) {
-        logger.info('Broadcasting to other participants', {
+        logger.info('Broadcasting to other participants (manual fallback)', {
           sessionId: result.sessionId,
           otherParticipants: otherParticipants.length
         });
@@ -807,16 +828,43 @@ app.post('/api/send-message', async (req, res) => {
 });
 
 /**
- * Webhook for conversation events
+ * Webhook for Twilio Conversations API events
+ * This handles all conversation events (message added, participant added, etc.)
  */
-app.post('/webhooks/conversation', (req, res) => {
-  logger.info('Received conversation webhook', {
-    eventType: req.body.EventType,
-    conversationSid: req.body.ConversationSid,
-    body: req.body
+app.post('/webhooks/conversations', async (req, res) => {
+  const eventType = req.body.EventType;
+  const conversationSid = req.body.ConversationSid;
+  const author = req.body.Author; // Phone number or identity
+  const messageBody = req.body.Body;
+  const messageSid = req.body.MessageSid;
+
+  logger.info('Received Conversations webhook', {
+    eventType,
+    conversationSid,
+    author,
+    messageSid,
+    bodyPreview: messageBody ? messageBody.substring(0, 50) : null
   });
 
-  res.sendStatus(200);
+  // Only process message events for logging/debugging
+  if (eventType === 'onMessageAdded') {
+    // Log all messages but don't process them
+    // We process messages through /webhooks/sms instead to avoid duplicates
+    logger.info('Conversation message logged', {
+      conversationSid,
+      author,
+      messageSid,
+      bodyPreview: messageBody?.substring(0, 100)
+    });
+
+    // All message processing happens through /webhooks/sms
+    // This webhook is just for visibility/debugging
+    res.sendStatus(200);
+  } else {
+    // Other event types (onParticipantAdded, etc.)
+    logger.debug('Non-message Conversations event', { eventType, conversationSid });
+    res.sendStatus(200);
+  }
 });
 
 // Start server

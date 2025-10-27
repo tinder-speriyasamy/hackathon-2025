@@ -4,8 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js",
+    "start": "node server.js 2>&1 | tee -a server.log",
+    "dev": "node server.js 2>&1 | tee -a server.log",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
