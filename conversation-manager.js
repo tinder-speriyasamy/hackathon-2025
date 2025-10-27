@@ -183,14 +183,19 @@ async function addParticipant(conversationSid, phoneNumber) {
               phoneNumber
             });
 
-            // Recreate conversationApi for the retry
+            // Recreate participantData and conversationApi for the retry
+            const retryParticipantData = {
+              'messagingBinding.address': whatsappAddress,
+              'messagingBinding.proxyAddress': whatsappNumber
+            };
+
             const retryConversationApi = serviceSid
               ? twilioClient.conversations.v1.services(serviceSid).conversations(conversationSid)
               : twilioClient.conversations.v1.conversations(conversationSid);
 
             const participant = await retryConversationApi
               .participants
-              .create(participantData);
+              .create(retryParticipantData);
 
             logger.info('Participant added successfully after cleanup', {
               conversationSid,

@@ -428,11 +428,20 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
   });
 
   try {
+    // Format messages for AI with sender information
+    const formattedMessages = session.messages.map(m => {
+      if (m.role === 'user' && m.sender) {
+        // Include sender name in user messages so AI knows who said what
+        return { role: m.role, content: `${m.sender}: ${m.content}` };
+      }
+      return { role: m.role, content: m.content };
+    });
+
     const completion = await openaiClient.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: fullSystemPrompt },
-        ...session.messages.map(m => ({ role: m.role, content: m.content }))
+        ...formattedMessages
       ],
       temperature: 0.7,
       max_tokens: 500, // Increased for JSON responses
@@ -699,30 +708,19 @@ Who are we creating this profile for today?`;
     };
   }
 
-  // Add user's message to Conversation (so other participants see it)
-  // WhatsApp doesn't display author metadata, so prepend name to message body
+  // NOTE: We DO NOT manually send user messages to the Conversation
+  // The Conversations API automatically receives messages from participants
+  // and broadcasts them to all other participants. Manually sending would
+  // create duplicate messages.
+
+  // User messages are already in the Conversation - we just need to log them
+  // to our session history for the AI context
   if (session.conversationSid) {
-    try {
-      const authorName = profileName || phoneNumber;
-      const formattedMessage = `*${authorName}:* ${message}`;
-
-      await conversationManager.sendMessage(
-        session.conversationSid,
-        authorName, // Use their name as author (metadata)
-        formattedMessage // Include author in message body for WhatsApp
-      );
-
-      logger.info('Added user message to Conversation', {
-        sessionId,
-        conversationSid: session.conversationSid,
-        author: authorName
-      });
-    } catch (error) {
-      logger.error('Failed to add user message to Conversation', {
-        sessionId,
-        error: error.message
-      });
-    }
+    logger.debug('User message already in Conversation (sent automatically)', {
+      sessionId,
+      conversationSid: session.conversationSid,
+      author: profileName || phoneNumber
+    });
   }
 
   // Handle normal conversation flow with AI + Actions

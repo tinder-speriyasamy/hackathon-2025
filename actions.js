@@ -156,6 +156,9 @@ async function executeAction(action, session, twilioSendMessage = null) {
 
 /**
  * Execute send_message action
+ *
+ * NOTE: When using Conversations API, messages are broadcast automatically
+ * to all participants, so manual sending is disabled to prevent duplicates.
  */
 async function executeSendMessage(action, session, twilioSendMessage) {
   const { target, message } = action;
@@ -183,20 +186,29 @@ async function executeSendMessage(action, session, twilioSendMessage) {
     sessionId: session.sessionId
   });
 
+  // DISABLED: Manual message sending is disabled when using Conversations API
+  // The Conversations API automatically broadcasts messages to all participants
+  // Enabling manual sends would create duplicate messages
+
   // If twilioSendMessage function is provided, use it
-  if (twilioSendMessage) {
-    for (const phoneNumber of recipients) {
-      try {
-        await twilioSendMessage(phoneNumber, message);
-      } catch (error) {
-        logger.error('Failed to send message', { phoneNumber, error: error.message });
-      }
-    }
-  }
+  // if (twilioSendMessage) {
+  //   for (const phoneNumber of recipients) {
+  //     try {
+  //       await twilioSendMessage(phoneNumber, message);
+  //     } catch (error) {
+  //       logger.error('Failed to send message', { phoneNumber, error: error.message });
+  //     }
+  //   }
+  // }
+
+  logger.info('Manual message sending skipped (using Conversations API)', {
+    sessionId: session.sessionId,
+    recipients
+  });
 
   return {
     success: true,
-    action: 'message_sent',
+    action: 'message_sent_via_conversations',
     recipients,
     message
   };
