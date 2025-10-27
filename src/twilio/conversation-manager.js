@@ -3,7 +3,7 @@
  * Handles Twilio Conversations API for group chat functionality
  */
 
-const logger = require('./logger');
+const logger = require('../utils/logger');
 
 // Twilio client will be injected
 let twilioClient = null;

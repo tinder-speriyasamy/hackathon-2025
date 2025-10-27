@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const aiMatchmaker = require('./ai-matchmaker');
+const aiMatchmaker = require('../core/ai-matchmaker');
 
 /**
  * Get all sessions from Redis

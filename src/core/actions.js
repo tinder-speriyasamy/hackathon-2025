@@ -3,7 +3,7 @@
  * Defines possible actions the AI can take and executes them
  */
 
-const logger = require('./logger');
+const logger = require('../utils/logger');
 
 /**
  * Conversation stages

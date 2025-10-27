@@ -15,9 +15,9 @@
  */
 
 const OpenAI = require('openai');
-const logger = require('./logger');
+const logger = require('../utils/logger');
 const redis = require('redis');
-const conversationManager = require('./conversation-manager');
+const conversationManager = require('../twilio/conversation-manager');
 const {
   STAGES,
   ACTION_TYPES,

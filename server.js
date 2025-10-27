@@ -19,10 +19,10 @@ const twilio = require('twilio');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const logger = require('./logger');
-const aiMatchmaker = require('./ai-matchmaker');
-const adminRoutes = require('./admin-routes');
-const conversationManager = require('./conversation-manager');
+const logger = require('./src/utils/logger');
+const aiMatchmaker = require('./src/core/ai-matchmaker');
+const adminRoutes = require('./src/routes/admin-routes');
+const conversationManager = require('./src/twilio/conversation-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -38,25 +38,111 @@ async function downloadAndSaveMedia(mediaUrl, contentType) {
   const url = require('url');
 
   return new Promise((resolve, reject) => {
-    const parsedUrl = url.parse(mediaUrl);
     const ext = contentType.split('/')[1] || 'jpg';
     const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.${ext}`;
     const filepath = path.join('uploads', filename);
 
     const file = fs.createWriteStream(filepath);
 
-    https.get(mediaUrl, (response) => {
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close();
-        logger.info('Media saved', { filepath });
-        resolve(`/uploads/${filename}`);
+    // Twilio media URLs require Basic Auth
+    const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
+
+    const options = {
+      headers: {
+        'Authorization': `Basic ${auth}`
+      }
+    };
+
+    const downloadFile = (currentUrl, redirectCount = 0) => {
+      if (redirectCount > 5) {
+        reject(new Error('Too many redirects'));
+        return;
+      }
+
+      https.get(currentUrl, options, (response) => {
+        // Handle redirects (301, 302, 307, 308)
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          logger.debug('Following redirect', {
+            from: currentUrl,
+            to: response.headers.location,
+            statusCode: response.statusCode
+          });
+          downloadFile(response.headers.location, redirectCount + 1);
+          return;
+        }
+
+        // Check if response is successful
+        if (response.statusCode !== 200) {
+          fs.unlink(filepath, () => {});
+          reject(new Error(`Failed to download media: HTTP ${response.statusCode}`));
+          return;
+        }
+
+        response.pipe(file);
+        file.on('finish', () => {
+          file.close();
+          const fileSize = fs.statSync(filepath).size;
+          logger.info('Media saved', { filepath, size: fileSize });
+
+          if (fileSize < 1000) {
+            logger.warn('Downloaded file is suspiciously small', { filepath, size: fileSize });
+          }
+
+          resolve(`/uploads/${filename}`);
+        });
+      }).on('error', (err) => {
+        fs.unlink(filepath, () => {});
+        reject(err);
       });
-    }).on('error', (err) => {
-      fs.unlink(filepath, () => {});
-      reject(err);
-    });
+    };
+
+    downloadFile(mediaUrl);
   });
+}
+
+/**
+ * Split long messages into chunks that fit WhatsApp's character limit
+ * @param {string} message - Message to split
+ * @param {number} maxLength - Maximum length per message (default 1500 to leave room for formatting)
+ * @returns {string[]} Array of message chunks
+ */
+function splitLongMessage(message, maxLength = 1500) {
+  if (message.length <= maxLength) {
+    return [message];
+  }
+
+  const chunks = [];
+  let remaining = message;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLength) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Try to split at a sentence boundary (., !, ?) within maxLength
+    let splitIndex = maxLength;
+    const sentenceEnd = remaining.lastIndexOf('. ', maxLength);
+    const questionEnd = remaining.lastIndexOf('? ', maxLength);
+    const exclamationEnd = remaining.lastIndexOf('! ', maxLength);
+
+    const bestSplit = Math.max(sentenceEnd, questionEnd, exclamationEnd);
+    if (bestSplit > maxLength * 0.7) {
+      // If we found a good sentence boundary (at least 70% through)
+      splitIndex = bestSplit + 1; // Include the punctuation
+    } else {
+      // Otherwise try to split at a word boundary
+      const lastSpace = remaining.lastIndexOf(' ', maxLength);
+      if (lastSpace > maxLength * 0.7) {
+        splitIndex = lastSpace;
+      }
+    }
+
+    chunks.push(remaining.substring(0, splitIndex).trim());
+    remaining = remaining.substring(splitIndex).trim();
+  }
+
+  return chunks;
 }
 
 // Twilio credentials from environment
@@ -266,28 +352,51 @@ app.post('/webhooks/sms', async (req, res) => {
       // Broadcast user's message to other participants with sender name
       const senderPhone = req.body.From.replace('whatsapp:', '');
       const senderName = req.body.ProfileName || senderPhone;
-      const userMessage = req.body.Body || '📷 [Photo sent]';
+      const userMessage = req.body.Body || (numMedia > 0 ? '📷 [Photo sent]' : '');
       const otherParticipants = result.participants.filter(p => p !== senderPhone);
 
       if (otherParticipants.length > 0) {
         logger.info('Broadcasting user message to other participants', {
           sessionId: result.sessionId,
           sender: senderName,
-          otherParticipants: otherParticipants.length
+          otherParticipants: otherParticipants.length,
+          hasMedia: numMedia > 0
         });
 
         // Format message with sender name
-        const formattedUserMessage = `*${senderName}:* ${userMessage}`;
+        const formattedUserMessage = userMessage ? `*${senderName}:* ${userMessage}` : `*${senderName}:*`;
 
         // Broadcast to other participants (fire and forget)
         otherParticipants.forEach(async (phoneNumber) => {
           try {
-            await twilioClient.messages.create({
+            const messageOptions = {
               from: process.env.TWILIO_WHATSAPP_NUMBER,
               to: `whatsapp:${phoneNumber}`,
               body: formattedUserMessage
+            };
+
+            // Include media URLs if present
+            // Use the downloaded media files served from our public server
+            if (numMedia > 0 && mediaUrls.length > 0) {
+              messageOptions.mediaUrl = [];
+
+              // Get the public base URL (from environment or construct from request)
+              const publicBaseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+
+              for (const localPath of mediaUrls) {
+                // Convert local path (/uploads/file.jpg) to full public URL
+                const fullMediaUrl = `${publicBaseUrl}${localPath}`;
+                messageOptions.mediaUrl.push(fullMediaUrl);
+                logger.debug('Adding media URL to broadcast', { fullMediaUrl });
+              }
+            }
+
+            await twilioClient.messages.create(messageOptions);
+            logger.debug('Broadcasted user message to participant', {
+              phoneNumber,
+              sender: senderName,
+              mediaCount: numMedia
             });
-            logger.debug('Broadcasted user message to participant', { phoneNumber, sender: senderName });
           } catch (error) {
             logger.error('Failed to broadcast user message', { phoneNumber, error: error.message });
           }
@@ -308,27 +417,39 @@ app.post('/webhooks/sms', async (req, res) => {
       // Format AI response with MeetCute prefix for clarity
       const formattedAIResponse = `*MeetCute:* ${result.response}`;
 
-      // Send response to original sender via TwiML
-      twiml.message(formattedAIResponse);
+      // Split long messages to fit WhatsApp's 1600 character limit
+      const messageChunks = splitLongMessage(formattedAIResponse);
 
-      // Broadcast to ALL participants (not just others, since Conversations API is no longer handling this)
       logger.info('Broadcasting AI response to all participants', {
         sessionId: result.sessionId,
-        participantCount: result.participants.length
+        participantCount: result.participants.length,
+        messageLength: formattedAIResponse.length,
+        chunks: messageChunks.length
       });
 
-      // Send to all participants (don't await, fire and forget)
-      result.participants.forEach(async (phoneNumber) => {
-        // Skip the sender since they get it via TwiML response
-        if (phoneNumber === senderPhone) return;
+      // Send first chunk to original sender via TwiML
+      twiml.message(messageChunks[0]);
 
+      // Send all chunks to all participants (including remaining chunks to sender)
+      result.participants.forEach(async (phoneNumber) => {
         try {
-          await twilioClient.messages.create({
-            from: process.env.TWILIO_WHATSAPP_NUMBER,
-            to: `whatsapp:${phoneNumber}`,
-            body: formattedAIResponse
-          });
-          logger.debug('Broadcasted AI response to participant', { phoneNumber, sessionId: result.sessionId });
+          // For the sender, skip the first chunk (already sent via TwiML)
+          const startIndex = phoneNumber === senderPhone ? 1 : 0;
+
+          for (let i = startIndex; i < messageChunks.length; i++) {
+            await twilioClient.messages.create({
+              from: process.env.TWILIO_WHATSAPP_NUMBER,
+              to: `whatsapp:${phoneNumber}`,
+              body: messageChunks[i]
+            });
+
+            logger.debug('Broadcasted AI response chunk', {
+              phoneNumber,
+              sessionId: result.sessionId,
+              chunk: i + 1,
+              totalChunks: messageChunks.length
+            });
+          }
         } catch (error) {
           logger.error('Failed to broadcast AI response', { phoneNumber, error: error.message });
         }
