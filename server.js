@@ -263,6 +263,37 @@ app.post('/webhooks/sms', async (req, res) => {
         sentViaConversations: result.sentViaConversations || false
       });
 
+      // Broadcast user's message to other participants with sender name
+      const senderPhone = req.body.From.replace('whatsapp:', '');
+      const senderName = req.body.ProfileName || senderPhone;
+      const userMessage = req.body.Body || '📷 [Photo sent]';
+      const otherParticipants = result.participants.filter(p => p !== senderPhone);
+
+      if (otherParticipants.length > 0) {
+        logger.info('Broadcasting user message to other participants', {
+          sessionId: result.sessionId,
+          sender: senderName,
+          otherParticipants: otherParticipants.length
+        });
+
+        // Format message with sender name
+        const formattedUserMessage = `*${senderName}:* ${userMessage}`;
+
+        // Broadcast to other participants (fire and forget)
+        otherParticipants.forEach(async (phoneNumber) => {
+          try {
+            await twilioClient.messages.create({
+              from: process.env.TWILIO_WHATSAPP_NUMBER,
+              to: `whatsapp:${phoneNumber}`,
+              body: formattedUserMessage
+            });
+            logger.debug('Broadcasted user message to participant', { phoneNumber, sender: senderName });
+          } catch (error) {
+            logger.error('Failed to broadcast user message', { phoneNumber, error: error.message });
+          }
+        });
+      }
+
       // If message was already sent via Conversations API, just acknowledge
       if (result.sentViaConversations) {
         logger.info('Message already sent via Conversations API, skipping manual broadcast', {
@@ -274,33 +305,34 @@ app.post('/webhooks/sms', async (req, res) => {
         return;
       }
 
-      // Fallback: Send response to original sender via TwiML
-      twiml.message(result.response);
+      // Format AI response with MeetCute prefix for clarity
+      const formattedAIResponse = `*MeetCute:* ${result.response}`;
 
-      // Broadcast to all other participants in the session (async, don't wait)
-      const senderPhone = req.body.From.replace('whatsapp:', '');
-      const otherParticipants = result.participants.filter(p => p !== senderPhone);
+      // Send response to original sender via TwiML
+      twiml.message(formattedAIResponse);
 
-      if (otherParticipants.length > 0) {
-        logger.info('Broadcasting to other participants (manual fallback)', {
-          sessionId: result.sessionId,
-          otherParticipants: otherParticipants.length
-        });
+      // Broadcast to ALL participants (not just others, since Conversations API is no longer handling this)
+      logger.info('Broadcasting AI response to all participants', {
+        sessionId: result.sessionId,
+        participantCount: result.participants.length
+      });
 
-        // Send to other participants (don't await, fire and forget)
-        otherParticipants.forEach(async (phoneNumber) => {
-          try {
-            await twilioClient.messages.create({
-              from: process.env.TWILIO_WHATSAPP_NUMBER,
-              to: `whatsapp:${phoneNumber}`,
-              body: result.response
-            });
-            logger.debug('Broadcasted to participant', { phoneNumber, sessionId: result.sessionId });
-          } catch (error) {
-            logger.error('Failed to broadcast to participant', { phoneNumber, error: error.message });
-          }
-        });
-      }
+      // Send to all participants (don't await, fire and forget)
+      result.participants.forEach(async (phoneNumber) => {
+        // Skip the sender since they get it via TwiML response
+        if (phoneNumber === senderPhone) return;
+
+        try {
+          await twilioClient.messages.create({
+            from: process.env.TWILIO_WHATSAPP_NUMBER,
+            to: `whatsapp:${phoneNumber}`,
+            body: formattedAIResponse
+          });
+          logger.debug('Broadcasted AI response to participant', { phoneNumber, sessionId: result.sessionId });
+        } catch (error) {
+          logger.error('Failed to broadcast AI response', { phoneNumber, error: error.message });
+        }
+      });
 
     } catch (error) {
       logger.error('Error processing AI response', error);

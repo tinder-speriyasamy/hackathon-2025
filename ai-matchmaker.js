@@ -233,38 +233,8 @@ async function createSession(creatorPhone, creatorName) {
     actions: [] // History of actions taken by AI
   };
 
-  // Create Twilio Conversation for real group chat
-  try {
-    const conversation = await conversationManager.createConversation(sessionId, {
-      creatorPhone,
-      creatorName
-    });
-
-    sessionData.conversationSid = conversation.sid;
-
-    logger.info('Created Twilio Conversation for session', {
-      sessionId,
-      conversationSid: conversation.sid
-    });
-
-    // Add creator as first participant to the conversation
-    await conversationManager.addParticipant(
-      conversation.sid,
-      creatorPhone
-    );
-
-    logger.info('Added creator to Twilio Conversation', {
-      sessionId,
-      conversationSid: conversation.sid,
-      creatorPhone
-    });
-  } catch (error) {
-    logger.error('Failed to create Twilio Conversation', {
-      sessionId,
-      error: error.message
-    });
-    // Continue without Conversation - will fall back to manual broadcast
-  }
+  // Note: Using manual message broadcasting instead of Conversations API
+  // This gives us full control over message formatting with sender names
 
   await setSession(sessionId, sessionData);
   await setPhoneMapping(creatorPhone, sessionId);
@@ -301,30 +271,7 @@ async function joinSession(sessionId, phoneNumber, name) {
     role: 'friend'
   });
 
-  // Add participant to Twilio Conversation (if exists)
-  if (session.conversationSid) {
-    try {
-      await conversationManager.addParticipant(
-        session.conversationSid,
-        phoneNumber
-      );
-
-      logger.info('Added participant to Twilio Conversation', {
-        sessionId,
-        conversationSid: session.conversationSid,
-        phoneNumber,
-        name
-      });
-    } catch (error) {
-      logger.error('Failed to add participant to Twilio Conversation', {
-        sessionId,
-        conversationSid: session.conversationSid,
-        phoneNumber,
-        error: error.message
-      });
-      // Continue without Conversation - will fall back to manual broadcast
-    }
-  }
+  // Note: Using manual message broadcasting - no Conversations API participant management needed
 
   await setSession(sessionId, session);
   await setPhoneMapping(phoneNumber, sessionId);
@@ -765,52 +712,14 @@ Who are we creating this profile for today?`;
   // Re-fetch session to get latest state
   const updatedSession = await getSessionData(sessionId);
 
-  // Send AI response via Conversations API (if available)
-  // Twilio will automatically broadcast to all participants
-  if (updatedSession && updatedSession.conversationSid && aiResult.message) {
-    try {
-      // Format AI message with author prefix for WhatsApp
-      const formattedAIMessage = `*MeetCute:* ${aiResult.message}`;
-
-      await conversationManager.sendMessage(
-        updatedSession.conversationSid,
-        'MeetCute', // Author name as specified
-        formattedAIMessage
-      );
-
-      logger.info('Sent AI response via Conversations API', {
-        sessionId,
-        conversationSid: updatedSession.conversationSid,
-        responseLength: aiResult.message.length
-      });
-
-      // Mark that we used Conversations API
-      return {
-        response: aiResult.message,
-        sessionId,
-        participants: updatedSession.participants.map(p => p.phoneNumber),
-        actions: aiResult.actions || [],
-        reasoning: aiResult.reasoning,
-        sentViaConversations: true // Indicates response already sent
-      };
-    } catch (error) {
-      logger.error('Failed to send via Conversations API, falling back to manual broadcast', {
-        sessionId,
-        conversationSid: updatedSession.conversationSid,
-        error: error.message
-      });
-      // Fall through to return normally for manual broadcast
-    }
-  }
-
-  // Fallback: return for manual broadcast (old behavior)
+  // Return for manual broadcast with formatted names
   return {
     response: aiResult.message,
     sessionId,
     participants: updatedSession ? updatedSession.participants.map(p => p.phoneNumber) : [],
     actions: aiResult.actions || [],
     reasoning: aiResult.reasoning,
-    sentViaConversations: false // Indicates needs manual broadcast
+    sentViaConversations: false // Always use manual broadcast for proper name formatting
   };
 }
 
