@@ -33,6 +33,50 @@ const INTEREST_CATEGORIES = [
 const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary', 'Other'];
 
 /**
+ * Sexual orientation options
+ */
+const ORIENTATION_OPTIONS = ['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Questioning'];
+
+/**
+ * Relationship intent options
+ */
+const RELATIONSHIP_INTENT_OPTIONS = [
+  'Long-term only',
+  'Long-term, open to short',
+  'Short-term, open to long',
+  'Still figuring it out'
+];
+
+/**
+ * Education level options
+ */
+const EDUCATION_LEVEL_OPTIONS = [
+  'High School',
+  'In College',
+  'Associate Degree',
+  'Bachelor\'s Degree',
+  'Master\'s Degree',
+  'PhD',
+  'Trade School',
+  'Prefer not to say'
+];
+
+/**
+ * Fixed profile prompts
+ * These are the questions that will be asked to build the profile
+ */
+const PROFILE_PROMPTS = [
+  'My weakness is...',
+  'Perks of dating me...',
+  'People would describe me as...'
+];
+
+/**
+ * Common pet types
+ */
+const PET_TYPES = ['Dog', 'Cat', 'Bird', 'Fish', 'Reptile', 'Rabbit', 'Other'];
+
+/**
  * Profile schema definition with required fields
  */
 const PROFILE_SCHEMA = {
@@ -111,6 +155,115 @@ const PROFILE_SCHEMA = {
         typeof interest === 'string' && interest.trim().length > 0
       );
     }
+  },
+  sexual_orientation: {
+    type: 'string',
+    required: true,
+    description: 'User\'s sexual orientation',
+    options: ORIENTATION_OPTIONS,
+    validate: (value) => {
+      if (!value || typeof value !== 'string') return false;
+      return value.trim().length > 0;
+    }
+  },
+  relationship_intent: {
+    type: 'string',
+    required: true,
+    description: 'What user is looking for in relationships',
+    options: RELATIONSHIP_INTENT_OPTIONS,
+    validate: (value) => {
+      if (!value || typeof value !== 'string') return false;
+      return RELATIONSHIP_INTENT_OPTIONS.some(opt =>
+        opt.toLowerCase() === value.toLowerCase()
+      );
+    }
+  },
+  height: {
+    type: 'string',
+    required: true,
+    description: 'User\'s height (e.g., "5\'6\"" or "170cm")',
+    validate: (value) => {
+      if (!value || typeof value !== 'string') return false;
+      return value.trim().length > 0;
+    }
+  },
+  bio: {
+    type: 'string',
+    required: true,
+    description: 'User\'s profile bio/about section',
+    validate: (value) => {
+      if (!value || typeof value !== 'string') return false;
+      return value.trim().length >= 10 && value.trim().length <= 500;
+    }
+  },
+  prompts: {
+    type: 'array',
+    required: false,
+    description: 'Profile prompt answers',
+    promptQuestions: PROFILE_PROMPTS,
+    validate: (value) => {
+      if (!value) return true; // Optional field
+      if (!Array.isArray(value)) return false;
+
+      // Each prompt should have a question and answer
+      return value.every(prompt =>
+        prompt &&
+        typeof prompt === 'object' &&
+        typeof prompt.question === 'string' &&
+        typeof prompt.answer === 'string' &&
+        prompt.question.trim().length > 0 &&
+        prompt.answer.trim().length > 0
+      );
+    }
+  },
+  education_level: {
+    type: 'string',
+    required: false,
+    description: 'User\'s education level',
+    options: EDUCATION_LEVEL_OPTIONS,
+    validate: (value) => {
+      if (!value) return true; // Optional field
+      if (typeof value !== 'string') return false;
+      return EDUCATION_LEVEL_OPTIONS.some(opt =>
+        opt.toLowerCase() === value.toLowerCase()
+      );
+    }
+  },
+  major: {
+    type: 'string',
+    required: false,
+    description: 'User\'s field of study or major',
+    validate: (value) => {
+      if (!value) return true; // Optional field
+      if (typeof value !== 'string') return false;
+      return value.trim().length > 0 && value.trim().length <= 100;
+    }
+  },
+  pets: {
+    type: 'array',
+    required: false,
+    description: 'Types of pets user has',
+    petTypes: PET_TYPES,
+    validate: (value) => {
+      if (!value) return true; // Optional field
+      if (!Array.isArray(value)) return false;
+      return value.every(pet => typeof pet === 'string' && pet.trim().length > 0);
+    }
+  },
+  height_preference: {
+    type: 'object',
+    required: false,
+    description: 'User\'s height preference for matches',
+    validate: (value) => {
+      if (!value) return true; // Optional field
+      if (typeof value !== 'object') return false;
+
+      // Should have min and dealbreaker properties
+      if (value.min && typeof value.min !== 'string') return false;
+      if (value.dealbreaker !== undefined && typeof value.dealbreaker !== 'boolean') return false;
+
+      return true;
+    }
   }
 };
 
@@ -126,7 +279,16 @@ function initializeProfileSchema() {
     photo: null,
     schools: [],
     interested_in: null,
-    interests: []
+    interests: [],
+    sexual_orientation: null,
+    relationship_intent: null,
+    height: null,
+    bio: null,
+    prompts: [],
+    education_level: null,
+    major: null,
+    pets: [],
+    height_preference: null
   };
 }
 
@@ -181,6 +343,50 @@ function isSchemaComplete(profileSchema) {
 }
 
 /**
+ * Check if profile has minimum required fields for generation/rendering
+ * This is a more lenient check used specifically for profile card generation.
+ * Only requires: name, age, and photo (the bare minimum for a profile card)
+ *
+ * Note: AI should still try to collect all fields defined in PROFILE_SCHEMA,
+ * but profile generation can proceed with just these three fields.
+ *
+ * @param {Object} profileSchema - Current profile schema data
+ * @returns {boolean} True if minimum required fields (name, age, photo) are filled
+ */
+function isSchemaCompleteForGeneration(profileSchema) {
+  if (!profileSchema) return false;
+
+  // Only check the three essential fields for rendering
+  const requiredForGeneration = ['name', 'age', 'photo'];
+
+  for (const fieldName of requiredForGeneration) {
+    if (!isFieldFilled(profileSchema, fieldName)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Get missing fields required for profile generation
+ * @param {Object} profileSchema - Current profile schema data
+ * @returns {string[]} Array of missing field names needed for generation
+ */
+function getMissingFieldsForGeneration(profileSchema) {
+  const requiredForGeneration = ['name', 'age', 'photo'];
+  const missing = [];
+
+  for (const fieldName of requiredForGeneration) {
+    if (!isFieldFilled(profileSchema, fieldName)) {
+      missing.push(fieldName);
+    }
+  }
+
+  return missing;
+}
+
+/**
  * Get completion percentage
  * @param {Object} profileSchema - Current profile schema data
  * @returns {number} Percentage complete (0-100)
@@ -204,7 +410,16 @@ function getFieldDisplayName(fieldName) {
     photo: 'profile photo',
     schools: 'school(s)',
     interested_in: 'who you\'re interested in',
-    interests: 'interests'
+    interests: 'interests',
+    sexual_orientation: 'sexual orientation',
+    relationship_intent: 'relationship intent',
+    height: 'height',
+    bio: 'bio',
+    prompts: 'profile prompts',
+    education_level: 'education level',
+    major: 'major/field of study',
+    pets: 'pets',
+    height_preference: 'height preference'
   };
   return names[fieldName] || fieldName;
 }
@@ -319,10 +534,17 @@ module.exports = {
   PROFILE_SCHEMA,
   INTEREST_CATEGORIES,
   GENDER_OPTIONS,
+  ORIENTATION_OPTIONS,
+  RELATIONSHIP_INTENT_OPTIONS,
+  EDUCATION_LEVEL_OPTIONS,
+  PROFILE_PROMPTS,
+  PET_TYPES,
   initializeProfileSchema,
   isFieldFilled,
   getMissingFields,
   isSchemaComplete,
+  isSchemaCompleteForGeneration,
+  getMissingFieldsForGeneration,
   getCompletionPercentage,
   getFieldDisplayName,
   updateField,

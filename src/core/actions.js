@@ -10,6 +10,8 @@ const {
   getMissingFields,
   getFieldDisplayName,
   isSchemaComplete,
+  isSchemaCompleteForGeneration,
+  getMissingFieldsForGeneration,
   updateField,
   initializeProfileSchema
 } = require('./profile-schema');
@@ -358,32 +360,27 @@ async function executeGenerateProfile(action, session) {
     hasProfileSchema: !!session.profileSchema
   });
 
-  // Validate that we're in the right stage
-  if (session.stage !== STAGES.PROFILE_CONFIRMATION &&
-      session.stage !== STAGES.PROFILE_GENERATION) {
-    logger.error('❌ Invalid stage for profile generation', {
-      sessionId: session.sessionId,
-      currentStage: session.stage,
-      requiredStages: [STAGES.PROFILE_CONFIRMATION, STAGES.PROFILE_GENERATION]
-    });
-    return {
-      success: false,
-      error: 'Can only generate profile after confirmation'
-    };
-  }
+  // Allow profile preview at any time as long as minimum fields are present
+  // No stage restrictions - users can view and regenerate the profile card anytime
+  logger.debug('Profile generation allowed at current stage', {
+    sessionId: session.sessionId,
+    currentStage: session.stage
+  });
 
-  // Validate profile schema is complete
-  if (!session.profileSchema || !isSchemaComplete(session.profileSchema)) {
-    const missing = getMissingFields(session.profileSchema || {});
-    logger.error('❌ Profile schema incomplete', {
+  // Validate profile has minimum required fields for rendering (name, age, photo)
+  // Note: AI is encouraged to collect ALL fields, but generation only requires these 3
+  if (!session.profileSchema || !isSchemaCompleteForGeneration(session.profileSchema)) {
+    const missing = getMissingFieldsForGeneration(session.profileSchema || {});
+    logger.error('❌ Profile missing required fields for generation', {
       sessionId: session.sessionId,
       hasSchema: !!session.profileSchema,
       missingFields: missing,
-      missingCount: missing.length
+      missingCount: missing.length,
+      note: 'Only name, age, and photo are required for generation'
     });
     return {
       success: false,
-      error: `Profile schema incomplete. Missing: ${missing.join(', ')}`
+      error: `Cannot generate profile. Missing required fields: ${missing.join(', ')} (name, age, and photo are required)`
     };
   }
 
