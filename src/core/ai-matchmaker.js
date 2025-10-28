@@ -15,6 +15,7 @@
  */
 
 const OpenAI = require('openai');
+const { Groq } = require('groq-sdk');
 const logger = require('../utils/logger');
 const redis = require('redis');
 const conversationManager = require('../twilio/conversation-manager');
@@ -28,16 +29,34 @@ const {
 } = require('./actions');
 const { initializeProfileSchema } = require('./profile-schema');
 
-// Initialize OpenAI client
+// LLM Provider Configuration
+const LLM_PROVIDER = process.env.LLM_PROVIDER || 'openai';
+
+// Initialize LLM clients
 let openaiClient = null;
+let groqClient = null;
+
 try {
-  openaiClient = new OpenAI({
-    apiKey: 'sk-pTWrsEjqMrWFmqt_Lts29A',
-    baseURL: 'https://litellmtokengateway.ue1.d1.tstaging.tools',
-  });
-  logger.info('OpenAI client initialized with custom base URL');
+  if (LLM_PROVIDER === 'openai') {
+    const apiBase = process.env.OPENAI_API_BASE || 'https://litellmtokengateway.ue1.d1.tstaging.tools';
+    openaiClient = new OpenAI({
+      apiKey: 'sk-pTWrsEjqMrWFmqt_Lts29A', // LiteLLM gateway API key
+      baseURL: apiBase,
+    });
+    logger.info('OpenAI client initialized', { baseURL: apiBase });
+  } else if (LLM_PROVIDER === 'groq') {
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error('GROQ_API_KEY not configured in environment');
+    }
+    groqClient = new Groq({
+      apiKey: process.env.GROQ_API_KEY
+    });
+    logger.info('Groq client initialized');
+  } else {
+    throw new Error(`Unknown LLM provider: ${LLM_PROVIDER}`);
+  }
 } catch (error) {
-  logger.error('Failed to initialize OpenAI client', error);
+  logger.error('Failed to initialize LLM client', { provider: LLM_PROVIDER, error: error.message });
   logger.warn('AI features disabled');
 }
 
@@ -333,6 +352,76 @@ async function getSessionById(sessionId) {
 }
 
 /**
+ * Call LLM with provider abstraction
+ * @param {Array} messages - Array of message objects {role, content}
+ * @param {Object} options - Optional settings (temperature, max_tokens, etc.)
+ * @returns {Promise<{content: string, usage: Object}>} Response from LLM
+ */
+async function callLLM(messages, options = {}) {
+  const {
+    temperature = 1,
+    max_tokens = 4000,
+    response_format = { type: "json_object" }
+  } = options;
+
+  if (LLM_PROVIDER === 'openai') {
+    if (!openaiClient) {
+      throw new Error('OpenAI client not initialized');
+    }
+
+    const model = process.env.OPENAI_MODEL || 'gpt-4.1';
+    const completion = await openaiClient.chat.completions.create({
+      model,
+      messages,
+      temperature,
+      max_tokens,
+      response_format
+    });
+
+    return {
+      content: completion.choices[0].message.content,
+      usage: completion.usage
+    };
+
+  } else if (LLM_PROVIDER === 'groq') {
+    if (!groqClient) {
+      throw new Error('Groq client not initialized');
+    }
+
+    const model = process.env.GROQ_MODEL || 'llama-3.1-70b-versatile';
+
+    // Groq requires explicit JSON instructions in the system prompt when using json_object mode
+    // Add JSON reminder to the last system message if response_format is json_object
+    let modifiedMessages = [...messages];
+    if (response_format?.type === 'json_object') {
+      const lastSystemIdx = modifiedMessages.findIndex(m => m.role === 'system');
+      if (lastSystemIdx !== -1) {
+        modifiedMessages[lastSystemIdx] = {
+          ...modifiedMessages[lastSystemIdx],
+          content: modifiedMessages[lastSystemIdx].content + '\n\nREMEMBER: You MUST respond with valid JSON only. Do not include any text outside the JSON object.'
+        };
+      }
+    }
+
+    const completion = await groqClient.chat.completions.create({
+      model,
+      messages: modifiedMessages,
+      temperature,
+      max_completion_tokens: max_tokens,
+      response_format
+    });
+
+    return {
+      content: completion.choices[0].message.content,
+      usage: completion.usage
+    };
+
+  } else {
+    throw new Error(`Unknown LLM provider: ${LLM_PROVIDER}`);
+  }
+}
+
+/**
  * Save a message to session history
  * @param {string} sessionId - Session ID
  * @param {string} role - 'user' or 'assistant'
@@ -380,11 +469,11 @@ async function saveMessage(sessionId, role, content, phoneNumber = null) {
  * @returns {Promise<string>} AI response
  */
 async function generateAIResponse(sessionId, userMessage, phoneNumber) {
-  if (!openaiClient) {
+  if (!openaiClient && !groqClient) {
     return {
-      message: "Sorry, AI features are not configured yet. Please add your OPENAI_API_KEY to the .env file!",
+      message: "Sorry, AI features are not configured yet. Please check your LLM provider settings in the .env file!",
       actions: [],
-      reasoning: "OpenAI not configured"
+      reasoning: "LLM client not configured"
     };
   }
 
@@ -435,22 +524,21 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     // Track LLM timing
     const llmStartTime = Date.now();
 
-    const completion = await openaiClient.chat.completions.create({
-      model: 'gpt-5-mini',
-      messages: [
-        { role: 'system', content: fullSystemPrompt },
-        ...formattedMessages
-      ],
-      max_tokens: 4000, // Increased for JSON responses
-      response_format: { type: "json_object" } // Request JSON response
+    const llmResult = await callLLM([
+      { role: 'system', content: fullSystemPrompt },
+      ...formattedMessages
+    ], {
+      max_tokens: 4000,
+      response_format: { type: "json_object" }
     });
 
     const llmDuration = Date.now() - llmStartTime;
-    const aiResponse = completion.choices[0].message.content;
+    const aiResponse = llmResult.content;
 
     logger.info('⚡ LLM Response', {
       duration: `${llmDuration}ms`,
-      tokens: completion.usage.total_tokens,
+      tokens: llmResult.usage.total_tokens,
+      provider: LLM_PROVIDER,
       sessionId
     });
 
@@ -458,8 +546,8 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     if (!aiResponse || aiResponse.trim() === '') {
       logger.error('AI returned empty response', {
         sessionId,
-        tokensUsed: completion.usage.total_tokens,
-        finishReason: completion.choices[0].finish_reason
+        tokensUsed: llmResult.usage.total_tokens,
+        provider: LLM_PROVIDER
       });
       return {
         message: "Sorry, I lost my train of thought. Could you repeat that?",
@@ -475,7 +563,8 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
       sessionId,
       hasMessage: !!parsed.message,
       actionCount: parsed.actions ? parsed.actions.length : 0,
-      tokensUsed: completion.usage.total_tokens
+      tokensUsed: llmResult.usage.total_tokens,
+      provider: LLM_PROVIDER
     });
 
     // Save the conversational message to history
