@@ -23,10 +23,12 @@ const {
   STAGES,
   ACTION_TYPES,
   getActionInstructions,
+  getResponseJsonSchema,
   executeAction,
   logAction,
   parseAIResponse
 } = require('./actions');
+const { validateJson } = require('../utils/json-schema');
 const { initializeProfileSchema } = require('./profile-schema');
 
 // LLM Provider Configuration
@@ -39,8 +41,9 @@ let groqClient = null;
 try {
   if (LLM_PROVIDER === 'openai') {
     const apiBase = process.env.OPENAI_API_BASE || 'https://litellmtokengateway.ue1.d1.tstaging.tools';
+    const apiKey = process.env.OPENAI_API_KEY || process.env.LITELLM_API_KEY;
     openaiClient = new OpenAI({
-      apiKey: 'sk-pTWrsEjqMrWFmqt_Lts29A', // LiteLLM gateway API key
+      apiKey,
       baseURL: apiBase,
     });
     logger.info('OpenAI client initialized', { baseURL: apiBase });
@@ -90,64 +93,20 @@ const phoneNames = new Map(); // phoneNumber -> name (from WhatsApp profile)
  * AI Matchmaker base system prompt
  * Defines the personality and behavior of the AI
  */
-const MATCHMAKER_BASE_PROMPT = `You are a fun, friendly AI matchmaker helping people create their dating profiles with their friends.
+const MATCHMAKER_BASE_PROMPT = `You are MeetCute — a warm, playful WhatsApp matchmaker.
 
-Your personality:
-- Warm and encouraging, like a supportive friend
-- Playful and uses emojis (but not excessively)
-- Natural and conversational, not formal or robotic
-- Asks thoughtful questions to understand what they're really looking for
-- Helps them articulate their authentic self
+Style:
+- Friendly, concise, natural; 1–2 short sentences max
+- Ask one question at a time
+- Address only the person who just spoke by name
 
-IMPORTANT - Group Chat Context:
-- This is a GROUP CHAT with multiple people
-- ONE person is creating their dating profile (the "primary user")
-- FRIENDS are here to give honest feedback and help
-- Always be clear about who you're addressing
-- Use names when you know them
+Group chat:
+- One primary user; friends can answer too
+- Use names when known; do not list everyone each message
 
-Your goal:
-- Help the PRIMARY USER create an authentic dating profile
-- Get their friends involved - friends know them best!
-- Ask about interests, values, what they're looking for
-- Collect friend feedback about the primary user's best qualities
-- Create a profile that feels real, not generic
-
-Conversation style:
-- Keep messages SHORT (1-3 sentences max per message)
-- Ask ONE question at a time
-- Be conversational, like texting a friend
-- Use their name when appropriate
-- Acknowledge and build on what they say
-
-IMPORTANT - Addressing People:
-- When responding to someone's answer, ONLY address THAT person (e.g., "Got it, Siva!")
-- ONLY list multiple names when you're asking a question to multiple people or giving a summary
-- DON'T start every message with everyone's names
-- Example GOOD: "Got it, Siva! What's your age?"
-- Example BAD: "Hey Siva, Sharmila — got it! What's your age?"
-- When switching to ask someone else, use their name: "Sharmila, what do you think about..."
-
-IMPORTANT - Message Formatting for WhatsApp:
-- Use line breaks to make messages easy to read on mobile
-- When listing profile info, put each field on a NEW LINE
-- Use blank lines to separate sections
-- Example of GOOD formatting:
-  "Hey Siva, Sharmila — profile summary:
-
-  Name: Siva
-  Gender: Male
-  Interested in: Women
-  School: UC Berkeley
-  Interests: Pop Culture & Movies & TV
-  Photo saved 📸
-
-  Sharmila says "He is a fantastic friend" — Siva, want to use that as your one-line highlight?"
-
-- Example of BAD formatting (don't do this):
-  "Hey Siva, Sharmila — profile summary: Name: Siva; Gender: Male; Interested in: Women; School: UC Berkeley; Interests: Pop Culture & Movies & TV; Photo saved 📸. Sharmila says..."
-
-Remember: This is happening over WhatsApp in a group chat, so keep it casual and easy to read on mobile with proper line breaks!`;
+WhatsApp formatting:
+- Use line breaks; one field per line for summaries
+`;
 
 /**
  * Redis helper functions with fallback to in-memory storage
@@ -370,13 +329,18 @@ async function callLLM(messages, options = {}) {
     }
 
     const model = process.env.OPENAI_MODEL || 'gpt-4.1';
-    const completion = await openaiClient.chat.completions.create({
+    const payload = {
       model,
       messages,
-      temperature,
       max_tokens,
       response_format
-    });
+    };
+    // gpt-5 family via LiteLLM only supports temperature=1; omit param to avoid UnsupportedParamsError
+    if (!/gpt-5/i.test(model)) {
+      payload.temperature = temperature;
+    }
+
+    const completion = await openaiClient.chat.completions.create(payload);
 
     return {
       content: completion.choices[0].message.content,
@@ -513,9 +477,11 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
 
   try {
     // Format messages for AI with sender information
-    const formattedMessages = session.messages.map(m => {
+    // Build compact context: last 8 messages + rolling summary (if present later)
+    const MAX_MSG = 8;
+    const tail = session.messages.slice(-MAX_MSG);
+    const formattedMessages = tail.map(m => {
       if (m.role === 'user' && m.sender) {
-        // Include sender name in user messages so AI knows who said what
         return { role: m.role, content: `${m.sender}: ${m.content}` };
       }
       return { role: m.role, content: m.content };
@@ -524,20 +490,33 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     // Track LLM timing
     const llmStartTime = Date.now();
 
+    // Append compact tool manifest + state digest to system prompt
+    const toolAndState = getActionInstructions(
+      session.stage,
+      session.participants,
+      session.profileSchema || {},
+      session.data || {}
+    );
+
+    const responseSchema = getResponseJsonSchema();
+
     const llmResult = await callLLM([
       { role: 'system', content: fullSystemPrompt },
+      { role: 'system', content: toolAndState },
       ...formattedMessages
     ], {
-      max_tokens: 4000,
-      response_format: { type: "json_object" }
+      // Avoid temperature on gpt-5 models; callLLM will omit it for gpt-5
+      temperature: 0.3,
+      max_tokens: 600,
+      response_format: { type: "json_schema", json_schema: responseSchema }
     });
 
     const llmDuration = Date.now() - llmStartTime;
     const aiResponse = llmResult.content;
 
-    logger.info('⚡ LLM Response', {
+  logger.info('⚡ LLM Response', {
       duration: `${llmDuration}ms`,
-      tokens: llmResult.usage.total_tokens,
+      tokens: llmResult.usage?.total_tokens,
       provider: LLM_PROVIDER,
       sessionId
     });
@@ -546,7 +525,7 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     if (!aiResponse || aiResponse.trim() === '') {
       logger.error('AI returned empty response', {
         sessionId,
-        tokensUsed: llmResult.usage.total_tokens,
+        tokensUsed: llmResult.usage?.total_tokens,
         provider: LLM_PROVIDER
       });
       return {
@@ -557,13 +536,30 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     }
 
     // Parse AI response
-    const parsed = parseAIResponse(aiResponse);
+    // Validate JSON against schema; if invalid, fall back to tolerant parser
+    let parsed;
+    try {
+      const candidate = JSON.parse(aiResponse);
+      const validation = validateJson(responseSchema, candidate);
+      if (validation.valid) {
+        parsed = {
+          message: candidate.message || '',
+          actions: candidate.actions || [],
+          reasoning: candidate.reasoning || ''
+        };
+      } else {
+        logger.warn('AI response failed schema validation', { errors: validation.errors.slice(0, 5) });
+        parsed = parseAIResponse(aiResponse);
+      }
+    } catch (e) {
+      parsed = parseAIResponse(aiResponse);
+    }
 
     logger.info('AI response generated and parsed', {
       sessionId,
       hasMessage: !!parsed.message,
       actionCount: parsed.actions ? parsed.actions.length : 0,
-      tokensUsed: llmResult.usage.total_tokens,
+      tokensUsed: llmResult.usage?.total_tokens,
       provider: LLM_PROVIDER
     });
 

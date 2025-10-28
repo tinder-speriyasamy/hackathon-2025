@@ -51,179 +51,144 @@ const ACTION_TYPES = {
  * @returns {string} Formatted action instructions
  */
 function getActionInstructions(currentStage, participants, profileSchema = {}, sessionData = {}) {
-  const participantList = participants.map(p => `${p.name} (${p.phoneNumber})`).join(', ');
+  const participantNames = participants.map(p => p.name || p.phoneNumber);
   const missingFields = getMissingFields(profileSchema);
   const schemaComplete = isSchemaComplete(profileSchema);
-
-  // Build missing fields display
-  const missingFieldsDisplay = missingFields.length > 0
-    ? missingFields.map(f => `- ${getFieldDisplayName(f)}`).join('\n')
-    : 'All required fields complete!';
-
-  // Build uploaded photos display
   const uploadedPhotos = sessionData.photos || [];
-  const photosDisplay = uploadedPhotos.length > 0
-    ? uploadedPhotos.map((url, index) => `${index + 1}. ${url}`).join('\n')
-    : 'No photos uploaded yet';
+  const lastPhoto = uploadedPhotos.length > 0 ? uploadedPhotos[uploadedPhotos.length - 1] : null;
 
-  return `
-## AVAILABLE ACTIONS
+  const toolManifest = getStageScopedToolManifest(currentStage, { lastPhoto });
 
-You can perform the following actions by returning them in your response:
+  const stateDigest = {
+    stage: currentStage,
+    participants: participantNames,
+    profileComplete: schemaComplete,
+    missingFields,
+    lastPhoto
+  };
 
-### 1. send_message
-Send a message to one or more participants, optionally with media.
-{
-  "type": "send_message",
-  "target": "phone_number or 'all'",
-  "message": "The message to send",
-  "mediaUrl": "optional: URL or path to media file (e.g., profile card image)"
+  return [
+    'TOOLS:',
+    JSON.stringify(toolManifest),
+    'STATE:',
+    JSON.stringify(stateDigest)
+  ].join('\n');
 }
 
-Example with media:
-{
-  "type": "send_message",
-  "target": "all",
-  "message": "Here's your profile!",
-  "mediaUrl": "/uploads/profile_card_123456.png"
+// Action registry with compact toolcards (purpose, schema, constraints, allowed stages)
+const ACTION_REGISTRY = [
+  {
+    type: 'send_message',
+    when: 'Use to send a short reply; attach profile image when available.',
+    schema: {
+      type: 'object',
+      required: ['type', 'target', 'message'],
+      properties: {
+        type: { const: 'send_message' },
+        target: { type: 'string', enum: ['all'] },
+        message: { type: 'string' },
+        mediaUrl: { type: 'string' }
+      }
+    },
+    constraints: ['message ≤ 2 sentences', 'ALWAYS set target="all" in group chat'],
+    stages: ['*']
+  },
+  {
+    type: 'update_stage',
+    when: 'Advance to a valid next stage only when conditions are met.',
+    schema: {
+      type: 'object',
+      required: ['type', 'stage'],
+      properties: {
+        type: { const: 'update_stage' },
+        stage: { type: 'string', enum: Object.values(STAGES) }
+      }
+    },
+    constraints: ['Do not go backwards from fetching_profiles'],
+    stages: ['*']
+  },
+  {
+    type: 'update_profile_schema',
+    when: 'Store or change a single profile field.',
+    schema: {
+      type: 'object',
+      required: ['type', 'field', 'value'],
+      properties: {
+        type: { const: 'update_profile_schema' },
+        field: { type: 'string', enum: ['name','gender','photo','schools','interested_in','interests'] },
+        value: {}
+      }
+    },
+    constraints: ['Validate field; interests len ≥ 2; photo must be uploaded URL'],
+    stages: [STAGES.PROFILE_CREATION, STAGES.PROFILE_CONFIRMATION]
+  },
+  {
+    type: 'generate_profile',
+    when: 'Generate finalized profile after confirmation.',
+    schema: { type: 'object', required: ['type'], properties: { type: { const: 'generate_profile' } } },
+    constraints: ['Only when schema complete and confirmed'],
+    stages: [STAGES.PROFILE_CONFIRMATION, STAGES.PROFILE_GENERATION]
+  },
+  {
+    type: 'commit_profile',
+    when: 'Commit profile after review and approval.',
+    schema: { type: 'object', required: ['type'], properties: { type: { const: 'commit_profile' } } },
+    constraints: ['Only from review stage'],
+    stages: [STAGES.PROFILE_REVIEW]
+  },
+  {
+    type: 'fetch_profiles',
+    when: 'Start fetching potential matches after commit.',
+    schema: { type: 'object', required: ['type'], properties: { type: { const: 'fetch_profiles' } } },
+    constraints: ['Only after profile confirmation/commit'],
+    stages: [STAGES.PROFILE_CONFIRMATION, STAGES.FETCHING_PROFILES]
+  }
+];
+
+function getStageScopedToolManifest(currentStage, context = {}) {
+  const allowed = ACTION_REGISTRY.filter(a => a.stages.includes('*') || a.stages.includes(currentStage));
+  return {
+    actions: allowed.map(a => ({
+      type: a.type,
+      when_to_use: a.when,
+      input_schema: a.schema,
+      constraints: a.constraints
+    })),
+    limits: {
+      max_actions_per_turn: 2,
+      message_sentence_limit: 2
+    },
+    policy: {
+      group_broadcast: 'All messages are posted to the group. Do not DM individuals.',
+      addressing: 'Address the last speaker by name in the message text only. Do not list multiple names unless summarizing.'
+    },
+    hints: context.lastPhoto ? { photo_hint: `Use uploaded photo URL exactly: ${context.lastPhoto}` } : {}
+  };
 }
 
-### 2. update_stage
-Progress the conversation to a new stage (only when appropriate).
-{
-  "type": "update_stage",
-  "stage": "${STAGES.INTRODUCTION}|${STAGES.PROFILE_CREATION}|${STAGES.PROFILE_CONFIRMATION}|${STAGES.PROFILE_GENERATION}|${STAGES.PROFILE_REVIEW}|${STAGES.PROFILE_COMMITTED}"
+function getActionUnionSchema() {
+  return {
+    oneOf: ACTION_REGISTRY.map(a => a.schema)
+  };
 }
 
-### 3. update_profile_schema
-Store information about the user's profile using the defined schema.
-{
-  "type": "update_profile_schema",
-  "field": "name|gender|photo|schools|interested_in|interests",
-  "value": "field value (string, array, etc.)"
-}
-
-Example for updating interests:
-{
-  "type": "update_profile_schema",
-  "field": "interests",
-  "value": ["Music", "Travel & Adventure"]
-}
-
-### 4. generate_profile
-Generate the final profile object (ONLY when schema is complete and confirmed).
-{
-  "type": "generate_profile"
-}
-
-### 5. commit_profile
-Commit the profile permanently (ONLY after user reviews and approves).
-{
-  "type": "commit_profile"
-}
-
-## CURRENT STATE
-- Stage: ${currentStage}
-- Participants: ${participantList}
-- Profile Schema Complete: ${schemaComplete ? 'YES' : 'NO'}
-
-## MISSING PROFILE FIELDS
-${missingFieldsDisplay}
-
-## UPLOADED PHOTOS
-${photosDisplay}
-
-## PROFILE SCHEMA REQUIREMENTS
-You MUST collect these fields to create a profile:
-
-1. **name**: User's first name
-2. **gender**: User's gender (${GENDER_OPTIONS.join(', ')})
-3. **photo**: Primary profile photo URL
-   ${uploadedPhotos.length > 0
-     ? `IMPORTANT: When setting the photo field, you MUST use one of the EXACT URLs listed above in "UPLOADED PHOTOS".
-   DO NOT use placeholder values like "latest_uploaded_photo" or "photo_1".
-   Use the complete URL exactly as shown above (starts with https://).
-   If the user uploads a photo or you need to set a photo, use: ${uploadedPhotos[uploadedPhotos.length - 1]}`
-     : 'Ask the user to upload a photo. When they upload, the URL will appear in UPLOADED PHOTOS above.'}
-4. **schools**: Educational institutions (e.g., ["Harvard", "MIT"])
-5. **interested_in**: Gender they want to date (${GENDER_OPTIONS.join(', ')}, Everyone)
-6. **interests**: At least 2 interests from these categories:
-   ${INTEREST_CATEGORIES.slice(0, 6).join(', ')}, and more...
-
-   Ask about 2 interest categories naturally in conversation.
-   Map their responses to the predefined categories.
-
-## STAGE FLOW RULES
-
-1. **${STAGES.INTRODUCTION}** → ${STAGES.PROFILE_CREATION}
-   - Greet the user warmly
-   - Say something like: "Let me get to know you better before we create your profile!"
-   - Move to profile_creation when ready
-
-2. **${STAGES.PROFILE_CREATION}** → STAYS HERE
-   - Ask conversational questions to collect required schema fields
-   - ANY participant in the chat can provide answers (not just profile owner)
-   - Use update_profile_schema action to store each field
-   - Fields can be updated/changed at any time during this stage
-   - DO NOT progress until ALL required fields are filled
-   - Keep a friendly, conversational tone
-
-3. **${STAGES.PROFILE_CREATION}** → ${STAGES.PROFILE_CONFIRMATION}
-   - Only move here when schema is 100% complete
-   - Present complete profile summary with all collected information
-   - Ask for confirmation: "Does this look good? Ready to create your profile?"
-   - Allow edits if user wants changes (go back to PROFILE_CREATION)
-
-4. **${STAGES.PROFILE_CONFIRMATION}** → ${STAGES.PROFILE_GENERATION}
-   - Only when user explicitly confirms (e.g., "yes", "looks good", "let's do it")
-   - Use generate_profile action to create the profile object
-   - Move to PROFILE_REVIEW to show the generated profile
-
-5. **${STAGES.PROFILE_GENERATION}** → ${STAGES.PROFILE_REVIEW}
-   - This happens automatically after profile generation
-   - A beautiful profile card image is generated automatically
-   - Send the profile card image to the user using send_message with mediaUrl
-   - The profileCardImage path is available in the generate_profile action result
-   - Ask: "What do you think? Ready to commit this profile?"
-
-   Example after generate_profile completes:
-   {
-     "type": "send_message",
-     "target": "all",
-     "message": "Here's your profile! What do you think?",
-     "mediaUrl": "<use the profileCardImage from generate_profile result>"
-   }
-
-6. **${STAGES.PROFILE_REVIEW}** → ${STAGES.PROFILE_COMMITTED}
-   - Only when user confirms they're happy with the profile
-   - Use commit_profile action to save permanently
-   - Celebrate! Profile is now live
-
-7. **${STAGES.PROFILE_COMMITTED}** → ${STAGES.FETCHING_PROFILES}
-   - Offer to show them potential matches
-   - Use fetch_profiles when ready
-
-## RESPONSE FORMAT
-You MUST return your response in this exact JSON format:
-
-{
-  "message": "Your conversational response to the user",
-  "actions": [
-    {action object 1},
-    {action object 2}
-  ],
-  "reasoning": "Brief explanation of why you chose these actions"
-}
-
-IMPORTANT:
-- ALWAYS include the "message" field with your conversational response
-- Include "actions" array with any actions you want to perform
-- Actions are executed in order
-- Keep messages conversational, warm, and friendly
-- Ask questions naturally, don't make it feel like a form
-- Accept input from ANY participant in the group chat
-- Only progress stages when appropriate based on the rules above
-`;
+function getResponseJsonSchema() {
+  return {
+    name: 'MatchmakerResponse',
+    schema: {
+      type: 'object',
+      required: ['message', 'actions'],
+      properties: {
+        message: { type: 'string' },
+        actions: {
+          type: 'array',
+          maxItems: 2,
+          items: getActionUnionSchema()
+        },
+        reasoning: { type: 'string' }
+      }
+    }
+  };
 }
 
 /**
@@ -836,6 +801,7 @@ module.exports = {
   STAGES,
   ACTION_TYPES,
   getActionInstructions,
+  getResponseJsonSchema,
   executeAction,
   logAction,
   parseAIResponse
