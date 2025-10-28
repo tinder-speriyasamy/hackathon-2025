@@ -3,58 +3,34 @@
 Hey team! Here's how to test our WhatsApp AI matchmaker app. This should take ~5 minutes.
 
 ## What You're Testing
-An AI matchmaker that helps you create a dating profile with input from your friends in a WhatsApp group chat.
+An AI matchmaker that helps you create a dating profile with input from your friends via WhatsApp. You message the bot directly, and it coordinates collaboration between you and your friends.
 
-## Testing Steps
+## Two Ways to Test
 
-### 1. Add the Bot to WhatsApp
-- Open WhatsApp on your phone
-- Add this number to your contacts: **+1 (415) 523-8886**
-- Or just open WhatsApp and message: **+14155238886**
-- Save it as "AI Matchmaker" or whatever you want
+### Flow 1: Start a New Profile Session
+1. Message the bot directly: **+14155238886**
+2. Send "Hi" or any message to start
+3. The bot gives you a session code to share with friends
 
-### 2. Start a Conversation
-**Option A: Test Solo**
-- Send any message to the bot (try "Hi" or "Hello")
-- The AI will introduce itself and start helping you create a profile
+### Flow 2: Join an Existing Session
+1. Message the bot directly: **+14155238886**
+2. Type: `join [CODE]` (e.g., "join ABC123")
+3. You're now collaborating with your friends on their profile
 
-**Option B: Test in a Group (Recommended!)**
-- Create a new WhatsApp group
-- Add 1-2 other team members to the group
-- Add the bot (+14155238886) to the group
-- Send a message to start ("Hey AI matchmaker!")
-- Now everyone can help create the profile together
+**How it works:**
+- Everyone messages the bot in their own direct chat
+- The bot coordinates messages between all participants in the same session
+- Everyone sees each other's messages and can help answer questions
 
-### 3. Follow the AI's Lead
-The AI will guide you through:
-- Collecting basic info (name, gender, interests)
-- Uploading a photo (send any image via WhatsApp)
-- Creating a dating profile summary
-- Reviewing and confirming your profile
+### What Happens Next
+The AI will guide you through collecting info, uploading photos, and creating a profile card. Answer naturally - anyone in the session can respond.
 
-**Tips:**
-- Answer naturally - the AI understands conversational responses
-- In groups, anyone can answer questions
-- You can upload photos directly through WhatsApp's photo picker
-- The AI will show you a profile card preview before finalizing
+## Things to Test
+- [ ] AI response speed
+- [ ] Join code system (invite a friend)
+- [ ] Multiple people collaborating
+- [ ] Photo uploads
+- [ ] Conversation flow
+- [ ] Final profile card quality
 
-### 4. Things to Test
-- [ ] Does the AI respond quickly?
-- [ ] Does it handle multiple people answering in a group?
-- [ ] Does photo upload work? (Send any selfie or test image)
-- [ ] Is the conversation flow natural?
-- [ ] Does the final profile card look good?
-- [ ] Are there any bugs or confusing moments?
-
-### 5. Report Issues
-Drop any bugs, feedback, or screenshots in our team chat!
-
-**Common issues to watch for:**
-- AI not responding
-- Photo uploads failing
-- Weird responses
-- Missing information in the final profile
-
----
-
-**Questions?** Just ping me on the team chat. Server is live and ready to go!
+**Report bugs or feedback in team chat!**
