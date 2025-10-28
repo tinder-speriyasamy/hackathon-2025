@@ -563,10 +563,10 @@ You've joined session ${sessionId}. There are now ${session.participants.length}
       // Send via Conversations API if available
       if (session.conversationSid) {
         try {
-          const formattedResponse = `*MeetCute:* ${response}`;
+          const formattedResponse = `*mchd:* ${response}`;
           await conversationManager.sendMessage(
             session.conversationSid,
-            'MeetCute',
+            'mchd',
             formattedResponse
           );
           return {
@@ -639,19 +639,19 @@ Message: *join ${sessionId}*
     // Send via Conversations API if available
     if (session.conversationSid) {
       try {
-        const formattedWelcome = `*MeetCute:* ${welcomeMessage}`;
-        const formattedShareable = `*MeetCute:* ${shareableMessage}`;
+        const formattedWelcome = `*mchd:* ${welcomeMessage}`;
+        const formattedShareable = `*mchd:* ${shareableMessage}`;
 
         await conversationManager.sendMessage(
           session.conversationSid,
-          'MeetCute',
+          'mchd',
           formattedWelcome
         );
 
         // Send shareable message separately so it's easier to forward
         await conversationManager.sendMessage(
           session.conversationSid,
-          'MeetCute',
+          'mchd',
           formattedShareable
         );
 
@@ -708,10 +708,10 @@ Type your answer to keep chatting!`;
     // Send via Conversations API if available
     if (session.conversationSid) {
       try {
-        const formattedMessage = `*MeetCute:* ${helpMessage}`;
+        const formattedMessage = `*mchd:* ${helpMessage}`;
         await conversationManager.sendMessage(
           session.conversationSid,
-          'MeetCute',
+          'mchd',
           formattedMessage
         );
         return {
@@ -769,19 +769,19 @@ Message: *join ${newSessionId}*
     // Send via Conversations API if available
     if (newSession.conversationSid) {
       try {
-        const formattedWelcome = `*MeetCute:* ${welcomeMessage}`;
-        const formattedShareable = `*MeetCute:* ${shareableMessage}`;
+        const formattedWelcome = `*mchd:* ${welcomeMessage}`;
+        const formattedShareable = `*mchd:* ${shareableMessage}`;
 
         await conversationManager.sendMessage(
           newSession.conversationSid,
-          'MeetCute',
+          'mchd',
           formattedWelcome
         );
 
         // Send shareable message separately so it's easier to forward
         await conversationManager.sendMessage(
           newSession.conversationSid,
-          'MeetCute',
+          'mchd',
           formattedShareable
         );
 

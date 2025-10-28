@@ -440,8 +440,8 @@ app.post('/webhooks/sms', async (req, res) => {
         return;
       }
 
-      // Format AI response with MeetCute prefix for clarity
-      const formattedAIResponse = `*MeetCute:* ${result.response}`;
+      // Format AI response with mchd prefix for clarity
+      const formattedAIResponse = `*mchd:* ${result.response}`;
 
       // Split long messages to fit WhatsApp's 1600 character limit
       const messageChunks = splitLongMessage(formattedAIResponse);
