@@ -22,25 +22,62 @@ function generateProfileHTML(profileData) {
     photo = '',
     schools = [],
     interested_in = 'Not specified',
-    interests = []
+    interests = [],
+    sexual_orientation = '',
+    relationship_intent = '',
+    height = '',
+    bio = '',
+    prompts = [],
+    education_level = '',
+    major = '',
+    pets = []
   } = profileData;
 
   // Use R2 photo URL directly
   const photoUrl = photo;
 
-  const schoolsDisplay = schools.length > 0
-    ? schools.join(', ')
-    : 'Not specified';
+  // Build education display
+  let educationDisplay = '';
+  if (schools.length > 0) {
+    educationDisplay = schools[0];
+    if (major) educationDisplay += ` · ${major}`;
+  } else if (education_level) {
+    educationDisplay = education_level;
+    if (major) educationDisplay += ` · ${major}`;
+  }
 
+  // Build interests display
   const interestsDisplay = interests.length > 0
-    ? interests.map(interest => `<span class="interest-tag">${interest}</span>`).join('')
-    : '<span class="interest-tag">No interests listed</span>';
+    ? interests.slice(0, 8).map(interest => `<span class="interest-tag">${interest}</span>`).join('')
+    : '';
+
+  // Build prompts display
+  const promptsDisplay = prompts && prompts.length > 0
+    ? prompts.map(prompt => `
+      <div class="prompt-card">
+        <div class="prompt-question">${prompt.question}</div>
+        <div class="prompt-answer">${prompt.answer}</div>
+      </div>
+    `).join('')
+    : '';
+
+  // Build info badges (height, orientation, relationship intent)
+  const infoBadges = [];
+  if (height) infoBadges.push(`<div class="info-badge"><span class="badge-icon">📏</span>${height}</div>`);
+  if (sexual_orientation) infoBadges.push(`<div class="info-badge"><span class="badge-icon">✨</span>${sexual_orientation}</div>`);
+  if (relationship_intent) infoBadges.push(`<div class="info-badge"><span class="badge-icon">💫</span>${relationship_intent}</div>`);
+  if (pets && pets.length > 0) infoBadges.push(`<div class="info-badge"><span class="badge-icon">🐾</span>${pets.join(', ')}</div>`);
+
+  const infoBadgesDisplay = infoBadges.join('');
 
   return `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     * {
       margin: 0;
@@ -52,22 +89,45 @@ function generateProfileHTML(profileData) {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       background: #000;
       width: 600px;
-      height: 800px;
+      height: 1100px;
       overflow: hidden;
     }
 
     .profile-card {
       width: 600px;
-      height: 800px;
+      height: 1100px;
       position: relative;
       overflow: hidden;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: #000;
+    }
+
+    .brand-header {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      z-index: 100;
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #FF6B9D 0%, #C06BFF 50%, #4ECDC4 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      padding: 14px 32px;
+      border-radius: 30px;
+      backdrop-filter: blur(10px);
+      background-color: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.15);
     }
 
     .photo-container {
       width: 100%;
       height: 100%;
-      position: relative;
+      position: absolute;
+      top: 0;
+      left: 0;
+      overflow: hidden;
     }
 
     .photo {
@@ -75,88 +135,6 @@ function generateProfileHTML(profileData) {
       height: 100%;
       object-fit: cover;
       object-position: center;
-    }
-
-    .overlay {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: linear-gradient(to top,
-        rgba(0, 0, 0, 0.95) 0%,
-        rgba(0, 0, 0, 0.85) 30%,
-        rgba(0, 0, 0, 0.4) 60%,
-        rgba(0, 0, 0, 0) 100%
-      );
-      padding: 40px 30px 30px;
-      color: white;
-    }
-
-    .name-age {
-      font-size: 48px;
-      font-weight: 700;
-      margin-bottom: 8px;
-      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
-      letter-spacing: -0.5px;
-    }
-
-    .info-row {
-      display: flex;
-      align-items: center;
-      margin-bottom: 16px;
-      font-size: 18px;
-      color: rgba(255, 255, 255, 0.9);
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
-    }
-
-    .info-label {
-      font-weight: 600;
-      margin-right: 8px;
-      color: rgba(255, 255, 255, 0.7);
-      text-transform: uppercase;
-      font-size: 12px;
-      letter-spacing: 1px;
-    }
-
-    .info-value {
-      font-weight: 500;
-    }
-
-    .section {
-      margin-bottom: 20px;
-    }
-
-    .section-title {
-      font-size: 12px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: rgba(255, 255, 255, 0.7);
-      margin-bottom: 10px;
-    }
-
-    .interests-container {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    .interest-tag {
-      background: rgba(255, 255, 255, 0.2);
-      backdrop-filter: blur(10px);
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 14px;
-      font-weight: 500;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    }
-
-    .schools {
-      font-size: 16px;
-      font-weight: 500;
-      color: rgba(255, 255, 255, 0.95);
-      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
     }
 
     .placeholder-photo {
@@ -169,10 +147,164 @@ function generateProfileHTML(profileData) {
       font-size: 120px;
       color: rgba(255, 255, 255, 0.3);
     }
+
+    .photo-overlay {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 70%;
+      background: linear-gradient(to top,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 0.95) 20%,
+        rgba(0, 0, 0, 0.8) 40%,
+        rgba(0, 0, 0, 0.4) 70%,
+        rgba(0, 0, 0, 0) 100%
+      );
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    .content-wrapper {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 20;
+      padding: 25px;
+      color: white;
+    }
+
+    .name-age {
+      font-size: 42px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+      letter-spacing: -0.5px;
+    }
+
+    .education-badge {
+      display: inline-flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(10px);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 15px;
+      font-weight: 500;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+      margin-bottom: 16px;
+    }
+
+    .content-section {
+      margin-top: 0;
+    }
+
+    ${bio ? `
+    .bio-section {
+      margin-bottom: 24px;
+      padding: 20px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .bio-text {
+      font-size: 16px;
+      line-height: 1.6;
+      color: rgba(255, 255, 255, 0.9);
+      font-weight: 400;
+    }` : ''}
+
+    ${promptsDisplay ? `
+    .prompts-section {
+      margin-bottom: 24px;
+    }
+
+    .prompt-card {
+      margin-bottom: 16px;
+      padding: 18px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .prompt-question {
+      font-size: 13px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.6);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .prompt-answer {
+      font-size: 16px;
+      line-height: 1.5;
+      color: rgba(255, 255, 255, 0.95);
+      font-weight: 400;
+    }` : ''}
+
+    ${infoBadgesDisplay ? `
+    .info-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .info-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .badge-icon {
+      font-size: 16px;
+    }` : ''}
+
+    ${interestsDisplay ? `
+    .interests-section {
+      margin-top: 24px;
+    }
+
+    .section-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: rgba(255, 255, 255, 0.5);
+      margin-bottom: 12px;
+    }
+
+    .interests-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .interest-tag {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }` : ''}
   </style>
 </head>
 <body>
   <div class="profile-card">
+    <!-- Full Bleed Photo Background -->
     <div class="photo-container">
       ${photo ?
         `<img src="${photoUrl}" alt="${name}" class="photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
@@ -181,30 +313,40 @@ function generateProfileHTML(profileData) {
       }
     </div>
 
-    <div class="overlay">
+    <!-- Black to Transparent Gradient Overlay -->
+    <div class="photo-overlay"></div>
+
+    <!-- mchd Brand Header -->
+    <div class="brand-header">mchd</div>
+
+    <!-- Content Overlay -->
+    <div class="content-wrapper">
       <div class="name-age">${name}, ${age}</div>
+      ${educationDisplay ? `<div class="education-badge">${educationDisplay}</div>` : ''}
 
-      <div class="section">
-        <div class="info-row">
-          <span class="info-label">Gender</span>
-          <span class="info-value">${gender}</span>
-        </div>
-        <div class="info-row">
-          <span class="info-label">Looking for</span>
-          <span class="info-value">${interested_in}</span>
-        </div>
-      </div>
+      <div class="content-section">
+        ${bio ? `
+        <div class="bio-section">
+          <div class="bio-text">${bio}</div>
+        </div>` : ''}
 
-      <div class="section">
-        <div class="section-title">Education</div>
-        <div class="schools">${schoolsDisplay}</div>
-      </div>
+        ${promptsDisplay ? `
+        <div class="prompts-section">
+          ${promptsDisplay}
+        </div>` : ''}
 
-      <div class="section">
-        <div class="section-title">Interests</div>
-        <div class="interests-container">
-          ${interestsDisplay}
-        </div>
+        ${infoBadgesDisplay ? `
+        <div class="info-badges">
+          ${infoBadgesDisplay}
+        </div>` : ''}
+
+        ${interestsDisplay ? `
+        <div class="interests-section">
+          <div class="section-title">Interests</div>
+          <div class="interests-container">
+            ${interestsDisplay}
+          </div>
+        </div>` : ''}
       </div>
     </div>
   </div>
@@ -250,7 +392,7 @@ async function renderProfileCard(profileData) {
     // Set viewport to match card size
     await page.setViewport({
       width: 600,
-      height: 800,
+      height: 1100,
       deviceScaleFactor: 2 // For retina quality
     });
 

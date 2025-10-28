@@ -343,6 +343,50 @@ function isSchemaComplete(profileSchema) {
 }
 
 /**
+ * Check if profile has minimum required fields for generation/rendering
+ * This is a more lenient check used specifically for profile card generation.
+ * Only requires: name, age, and photo (the bare minimum for a profile card)
+ *
+ * Note: AI should still try to collect all fields defined in PROFILE_SCHEMA,
+ * but profile generation can proceed with just these three fields.
+ *
+ * @param {Object} profileSchema - Current profile schema data
+ * @returns {boolean} True if minimum required fields (name, age, photo) are filled
+ */
+function isSchemaCompleteForGeneration(profileSchema) {
+  if (!profileSchema) return false;
+
+  // Only check the three essential fields for rendering
+  const requiredForGeneration = ['name', 'age', 'photo'];
+
+  for (const fieldName of requiredForGeneration) {
+    if (!isFieldFilled(profileSchema, fieldName)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Get missing fields required for profile generation
+ * @param {Object} profileSchema - Current profile schema data
+ * @returns {string[]} Array of missing field names needed for generation
+ */
+function getMissingFieldsForGeneration(profileSchema) {
+  const requiredForGeneration = ['name', 'age', 'photo'];
+  const missing = [];
+
+  for (const fieldName of requiredForGeneration) {
+    if (!isFieldFilled(profileSchema, fieldName)) {
+      missing.push(fieldName);
+    }
+  }
+
+  return missing;
+}
+
+/**
  * Get completion percentage
  * @param {Object} profileSchema - Current profile schema data
  * @returns {number} Percentage complete (0-100)
@@ -499,6 +543,8 @@ module.exports = {
   isFieldFilled,
   getMissingFields,
   isSchemaComplete,
+  isSchemaCompleteForGeneration,
+  getMissingFieldsForGeneration,
   getCompletionPercentage,
   getFieldDisplayName,
   updateField,
