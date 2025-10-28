@@ -177,19 +177,30 @@ async function deletePhoneMapping(phoneNumber) {
 }
 
 /**
- * Generate a unique session code
- * @returns {string} 6-character alphanumeric code
+ * Generate a unique session code using two random words
+ * @returns {string} Two-word session code (e.g., "taco-cloud")
  */
 function generateSessionCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Removed ambiguous chars (0, O, 1, I)
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  // Check if code already exists (very unlikely)
+  // List of short, easy-to-type words
+  const words = [
+    'blue', 'sky', 'tree', 'moon', 'star',
+    'wave', 'fire', 'rain', 'wind', 'leaf',
+    'rock', 'fish', 'bird', 'bear', 'lion',
+    'rose', 'snow', 'sun', 'sea', 'lake'
+  ];
+
+  // Pick two random words
+  const word1 = words[Math.floor(Math.random() * words.length)];
+  const word2 = words[Math.floor(Math.random() * words.length)];
+
+  // Join with dash for readability
+  const code = `${word1}-${word2}`;
+
+  // Check if code already exists (unlikely but possible)
   if (sessions.has(code)) {
     return generateSessionCode(); // Recursive retry
   }
+
   return code;
 }
 
