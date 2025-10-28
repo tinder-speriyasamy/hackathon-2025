@@ -26,6 +26,7 @@ const {
   logAction,
   parseAIResponse
 } = require('./actions');
+const { initializeProfileSchema } = require('./profile-schema');
 
 // Initialize OpenAI client
 let openaiClient = null;
@@ -224,13 +225,16 @@ async function createSession(creatorPhone, creatorName) {
     ],
     primaryUser: null, // { phoneNumber, name, confirmedAt }
     stage: STAGES.INTRODUCTION,
+    profileSchema: initializeProfileSchema(), // Schema-based profile data
     data: {
       photos: [],
       interests: [],
       preferences: {}
     },
     messages: [], // Conversation history for OpenAI
-    actions: [] // History of actions taken by AI
+    actions: [], // History of actions taken by AI
+    generatedProfile: null, // Profile after generation
+    committedProfile: null // Profile after commit
   };
 
   // Note: Using manual message broadcasting instead of Conversations API
@@ -327,7 +331,19 @@ async function saveMessage(sessionId, role, content, phoneNumber = null) {
 
   session.messages.push(message);
   await setSession(sessionId, session);
-  logger.debug('Saved message to session history', { sessionId, role, messageCount: session.messages.length });
+
+  // Log the actual message content
+  const icon = role === 'user' ? '👤' : '🤖';
+  const senderInfo = role === 'user' && message.sender ? ` (${message.sender})` : '';
+  logger.info(`${icon} ${role.toUpperCase()} Message Saved${senderInfo}`, {
+    sessionId,
+    role,
+    sender: message.sender || 'system',
+    phoneNumber: message.phoneNumber,
+    messageCount: session.messages.length,
+    messageLength: content?.length || 0,
+    messageContent: content
+  });
 }
 
 /**
@@ -363,7 +379,12 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
   session = await getSessionData(sessionId);
 
   // Build system prompt with action instructions
-  const actionInstructions = getActionInstructions(session.stage, session.participants);
+  const actionInstructions = getActionInstructions(
+    session.stage,
+    session.participants,
+    session.profileSchema || {},
+    session.data || {}
+  );
   const fullSystemPrompt = `${MATCHMAKER_BASE_PROMPT}\n\n${actionInstructions}`;
 
   logger.info('Generating AI response with actions', {
@@ -385,17 +406,30 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     });
 
     const completion = await openaiClient.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5-mini',
       messages: [
         { role: 'system', content: fullSystemPrompt },
         ...formattedMessages
       ],
-      temperature: 0.7,
-      max_tokens: 500, // Increased for JSON responses
+      max_tokens: 4000, // Increased for JSON responses
       response_format: { type: "json_object" } // Request JSON response
     });
 
     const aiResponse = completion.choices[0].message.content;
+
+    // Check for empty response
+    if (!aiResponse || aiResponse.trim() === '') {
+      logger.error('AI returned empty response', {
+        sessionId,
+        tokensUsed: completion.usage.total_tokens,
+        finishReason: completion.choices[0].finish_reason
+      });
+      return {
+        message: "Sorry, I lost my train of thought. Could you repeat that?",
+        actions: [],
+        reasoning: "Empty AI response"
+      };
+    }
 
     // Parse AI response
     const parsed = parseAIResponse(aiResponse);
@@ -508,27 +542,53 @@ You've joined session ${sessionId}. There are now ${session.participants.length}
 
     const welcomeMessage = `Hey ${profileName || 'there'}! 👋
 
-I'm your AI matchmaker! I've created session *${sessionId}* for you.
+I'm your AI matchmaker! I've created a session for you.
 
-Want your friends to join? Have them text me: *join ${sessionId}*
-
-Once everyone's here, we'll create an amazing dating profile together!
+Once your friends join, we'll create an amazing dating profile together!
 
 Ready to start? Who are we creating this profile for today?`;
 
+    // Get WhatsApp number from environment (remove 'whatsapp:' prefix for display)
+    const whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886';
+    const displayNumber = whatsappNumber.replace('whatsapp:', '');
+
+    // Create shareable invite message
+    const shareableMessage = `📱 *Share this with your friends:*
+
+━━━━━━━━━━━━━━━━
+🎯 Help me create my dating profile!
+
+Text this to: *${displayNumber}*
+
+Message: *join ${sessionId}*
+━━━━━━━━━━━━━━━━
+
+(Just forward this whole message!)`;
+
     await saveMessage(sessionId, 'assistant', welcomeMessage);
+    await saveMessage(sessionId, 'assistant', shareableMessage);
 
     // Send via Conversations API if available
     if (session.conversationSid) {
       try {
-        const formattedMessage = `*MeetCute:* ${welcomeMessage}`;
+        const formattedWelcome = `*MeetCute:* ${welcomeMessage}`;
+        const formattedShareable = `*MeetCute:* ${shareableMessage}`;
+
         await conversationManager.sendMessage(
           session.conversationSid,
           'MeetCute',
-          formattedMessage
+          formattedWelcome
         );
+
+        // Send shareable message separately so it's easier to forward
+        await conversationManager.sendMessage(
+          session.conversationSid,
+          'MeetCute',
+          formattedShareable
+        );
+
         return {
-          response: welcomeMessage,
+          response: welcomeMessage + '\n\n' + shareableMessage,
           sessionId,
           participants: session.participants.map(p => p.phoneNumber),
           sentViaConversations: true
@@ -542,7 +602,7 @@ Ready to start? Who are we creating this profile for today?`;
     }
 
     return {
-      response: welcomeMessage,
+      response: welcomeMessage + '\n\n' + shareableMessage,
       sessionId,
       participants: session.participants.map(p => p.phoneNumber),
       sentViaConversations: false
@@ -616,25 +676,49 @@ Type your answer to keep chatting!`;
 
     const welcomeMessage = `Starting fresh! 🎉
 
-New session created: *${newSessionId}*
+New session created! Who are we creating this profile for today?`;
 
-Have friends text: *join ${newSessionId}*
+    // Get WhatsApp number from environment (remove 'whatsapp:' prefix for display)
+    const whatsappNumber = process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+14155238886';
+    const displayNumber = whatsappNumber.replace('whatsapp:', '');
 
-Who are we creating this profile for today?`;
+    // Create shareable invite message
+    const shareableMessage = `📱 *Share this with your friends:*
+
+━━━━━━━━━━━━━━━━
+🎯 Help me create my dating profile!
+
+Text this to: *${displayNumber}*
+
+Message: *join ${newSessionId}*
+━━━━━━━━━━━━━━━━
+
+(Just forward this whole message!)`;
 
     await saveMessage(newSessionId, 'assistant', welcomeMessage);
+    await saveMessage(newSessionId, 'assistant', shareableMessage);
 
     // Send via Conversations API if available
     if (newSession.conversationSid) {
       try {
-        const formattedMessage = `*MeetCute:* ${welcomeMessage}`;
+        const formattedWelcome = `*MeetCute:* ${welcomeMessage}`;
+        const formattedShareable = `*MeetCute:* ${shareableMessage}`;
+
         await conversationManager.sendMessage(
           newSession.conversationSid,
           'MeetCute',
-          formattedMessage
+          formattedWelcome
         );
+
+        // Send shareable message separately so it's easier to forward
+        await conversationManager.sendMessage(
+          newSession.conversationSid,
+          'MeetCute',
+          formattedShareable
+        );
+
         return {
-          response: welcomeMessage,
+          response: welcomeMessage + '\n\n' + shareableMessage,
           sessionId: newSessionId,
           participants: newSession.participants.map(p => p.phoneNumber),
           sentViaConversations: true
@@ -648,7 +732,7 @@ Who are we creating this profile for today?`;
     }
 
     return {
-      response: welcomeMessage,
+      response: welcomeMessage + '\n\n' + shareableMessage,
       sessionId: newSessionId,
       participants: newSession.participants.map(p => p.phoneNumber),
       sentViaConversations: false
@@ -673,8 +757,20 @@ Who are we creating this profile for today?`;
   // Handle normal conversation flow with AI + Actions
   const aiResult = await generateAIResponse(sessionId, message, phoneNumber);
 
+  // Log the AI response message content
+  logger.info('💬 AI Response Generated', {
+    sessionId,
+    messageLength: aiResult.message?.length || 0,
+    hasMessage: !!aiResult.message,
+    isEmpty: !aiResult.message || aiResult.message.trim() === '',
+    messagePreview: aiResult.message ? aiResult.message.substring(0, 150) + (aiResult.message.length > 150 ? '...' : '') : '[NO MESSAGE]',
+    actionCount: aiResult.actions?.length || 0,
+    hasReasoning: !!aiResult.reasoning
+  });
+
   // Execute actions returned by AI
   let currentSession = await getSessionData(sessionId);
+  let profileCardImage = null;
   if (aiResult.actions && aiResult.actions.length > 0) {
     logger.info('Executing AI actions', {
       sessionId,
@@ -684,6 +780,11 @@ Who are we creating this profile for today?`;
     for (const action of aiResult.actions) {
       try {
         const result = await executeAction(action, currentSession);
+
+        // Capture profile card image if generated
+        if (result.profileCardImage) {
+          profileCardImage = result.profileCardImage;
+        }
 
         // Log action to session history
         logAction(currentSession, action, result);
@@ -719,6 +820,7 @@ Who are we creating this profile for today?`;
     participants: updatedSession ? updatedSession.participants.map(p => p.phoneNumber) : [],
     actions: aiResult.actions || [],
     reasoning: aiResult.reasoning,
+    profileCardImage: profileCardImage, // Include profile card if generated
     sentViaConversations: false // Always use manual broadcast for proper name formatting
   };
 }

@@ -20,6 +20,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const logger = require('./src/utils/logger');
+const { uploadToR2 } = require('./src/utils/r2-storage');
 const aiMatchmaker = require('./src/core/ai-matchmaker');
 const adminRoutes = require('./src/routes/admin-routes');
 const conversationManager = require('./src/twilio/conversation-manager');
@@ -28,22 +29,16 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 /**
- * Download and save media from Twilio
+ * Download media from Twilio and upload to R2
  * @param {string} mediaUrl - Twilio media URL
  * @param {string} contentType - Media content type
- * @returns {Promise<string>} Local file path
+ * @param {string} phoneNumber - Phone number for organizing files
+ * @returns {Promise<string>} Public R2 URL
  */
-async function downloadAndSaveMedia(mediaUrl, contentType) {
+async function downloadAndUploadToR2(mediaUrl, contentType, phoneNumber) {
   const https = require('https');
-  const url = require('url');
 
   return new Promise((resolve, reject) => {
-    const ext = contentType.split('/')[1] || 'jpg';
-    const filename = `${Date.now()}-${Math.round(Math.random() * 1E9)}.${ext}`;
-    const filepath = path.join('uploads', filename);
-
-    const file = fs.createWriteStream(filepath);
-
     // Twilio media URLs require Basic Auth
     const auth = Buffer.from(`${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}`).toString('base64');
 
@@ -73,25 +68,55 @@ async function downloadAndSaveMedia(mediaUrl, contentType) {
 
         // Check if response is successful
         if (response.statusCode !== 200) {
-          fs.unlink(filepath, () => {});
           reject(new Error(`Failed to download media: HTTP ${response.statusCode}`));
           return;
         }
 
-        response.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          const fileSize = fs.statSync(filepath).size;
-          logger.info('Media saved', { filepath, size: fileSize });
+        // Collect data chunks
+        const chunks = [];
+        response.on('data', (chunk) => {
+          chunks.push(chunk);
+        });
 
-          if (fileSize < 1000) {
-            logger.warn('Downloaded file is suspiciously small', { filepath, size: fileSize });
+        response.on('end', async () => {
+          try {
+            const fileBuffer = Buffer.concat(chunks);
+            const fileSize = fileBuffer.length;
+
+            logger.info('Media downloaded from Twilio', {
+              size: fileSize,
+              contentType
+            });
+
+            if (fileSize < 1000) {
+              logger.warn('Downloaded file is suspiciously small', { size: fileSize });
+            }
+
+            // Generate filename
+            const ext = contentType.split('/')[1] || 'jpg';
+            const filename = `photo.${ext}`;
+
+            // Use phone number (cleaned) as session identifier
+            const sessionId = phoneNumber.replace(/[^0-9]/g, '');
+
+            // Upload to R2
+            const publicUrl = await uploadToR2(fileBuffer, filename, contentType, sessionId);
+
+            logger.info('Media uploaded to R2 successfully', {
+              publicUrl,
+              size: fileSize
+            });
+
+            resolve(publicUrl);
+          } catch (error) {
+            logger.error('Failed to upload media to R2', {
+              error: error.message,
+              stack: error.stack
+            });
+            reject(error);
           }
-
-          resolve(`/uploads/${filename}`);
         });
       }).on('error', (err) => {
-        fs.unlink(filepath, () => {});
         reject(err);
       });
     };
@@ -183,8 +208,8 @@ const upload = multer({ storage: storage });
 // Middleware
 app.use(express.urlencoded({ extended: false })); // Parse URL-encoded bodies (Twilio sends this)
 app.use(express.json()); // Parse JSON bodies
-app.use('/uploads', express.static('uploads')); // Serve uploaded files
 app.use(express.static('public')); // Serve static files from public directory
+// Note: Profile card images are still stored locally in /uploads for now
 
 // Admin routes
 app.use('/admin', adminRoutes);
@@ -307,10 +332,10 @@ app.post('/webhooks/sms', async (req, res) => {
           contentType: contentType
         });
 
-        // Download and save the media
+        // Download and upload media to R2
         try {
-          const savedPath = await downloadAndSaveMedia(mediaUrl, contentType);
-          mediaUrls.push(savedPath);
+          const publicUrl = await downloadAndUploadToR2(mediaUrl, contentType, req.body.From);
+          mediaUrls.push(publicUrl);
         } catch (error) {
           logger.error('Failed to download media', error);
         }
@@ -366,8 +391,8 @@ app.post('/webhooks/sms', async (req, res) => {
         // Format message with sender name
         const formattedUserMessage = userMessage ? `*${senderName}:* ${userMessage}` : `*${senderName}:*`;
 
-        // Broadcast to other participants (fire and forget)
-        otherParticipants.forEach(async (phoneNumber) => {
+        // Broadcast to other participants and WAIT for all to complete
+        for (const phoneNumber of otherParticipants) {
           try {
             const messageOptions = {
               from: process.env.TWILIO_WHATSAPP_NUMBER,
@@ -375,20 +400,10 @@ app.post('/webhooks/sms', async (req, res) => {
               body: formattedUserMessage
             };
 
-            // Include media URLs if present
-            // Use the downloaded media files served from our public server
+            // Include media URLs if present (R2 URLs)
             if (numMedia > 0 && mediaUrls.length > 0) {
-              messageOptions.mediaUrl = [];
-
-              // Get the public base URL (from environment or construct from request)
-              const publicBaseUrl = process.env.PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
-
-              for (const localPath of mediaUrls) {
-                // Convert local path (/uploads/file.jpg) to full public URL
-                const fullMediaUrl = `${publicBaseUrl}${localPath}`;
-                messageOptions.mediaUrl.push(fullMediaUrl);
-                logger.debug('Adding media URL to broadcast', { fullMediaUrl });
-              }
+              messageOptions.mediaUrl = mediaUrls;
+              logger.debug('Adding media URLs to broadcast', { mediaUrls });
             }
 
             await twilioClient.messages.create(messageOptions);
@@ -400,7 +415,7 @@ app.post('/webhooks/sms', async (req, res) => {
           } catch (error) {
             logger.error('Failed to broadcast user message', { phoneNumber, error: error.message });
           }
-        });
+        }
       }
 
       // If message was already sent via Conversations API, just acknowledge
@@ -424,36 +439,60 @@ app.post('/webhooks/sms', async (req, res) => {
         sessionId: result.sessionId,
         participantCount: result.participants.length,
         messageLength: formattedAIResponse.length,
-        chunks: messageChunks.length
+        chunks: messageChunks.length,
+        senderPhone: senderPhone
       });
 
-      // Send first chunk to original sender via TwiML
-      twiml.message(messageChunks[0]);
-
-      // Send all chunks to all participants (including remaining chunks to sender)
-      result.participants.forEach(async (phoneNumber) => {
+      // Send all chunks to all participants via API (simpler and more reliable than TwiML split)
+      for (const phoneNumber of result.participants) {
         try {
-          // For the sender, skip the first chunk (already sent via TwiML)
-          const startIndex = phoneNumber === senderPhone ? 1 : 0;
+          logger.debug('Sending AI response to participant', {
+            phoneNumber,
+            senderPhone,
+            isSender: phoneNumber === senderPhone,
+            sessionId: result.sessionId,
+            chunksToSend: messageChunks.length
+          });
 
-          for (let i = startIndex; i < messageChunks.length; i++) {
+          // Send all message chunks
+          for (let i = 0; i < messageChunks.length; i++) {
             await twilioClient.messages.create({
               from: process.env.TWILIO_WHATSAPP_NUMBER,
               to: `whatsapp:${phoneNumber}`,
               body: messageChunks[i]
             });
 
-            logger.debug('Broadcasted AI response chunk', {
+            logger.debug('Sent AI response chunk', {
               phoneNumber,
               sessionId: result.sessionId,
               chunk: i + 1,
               totalChunks: messageChunks.length
             });
           }
+
+          // Send profile card image if available (after all text chunks)
+          if (result.profileCardImage) {
+            await twilioClient.messages.create({
+              from: process.env.TWILIO_WHATSAPP_NUMBER,
+              to: `whatsapp:${phoneNumber}`,
+              body: '📸 Your profile card',
+              mediaUrl: [result.profileCardImage]
+            });
+
+            logger.info('Sent profile card image', {
+              phoneNumber,
+              sessionId: result.sessionId,
+              imagePath: result.profileCardImage
+            });
+          }
         } catch (error) {
-          logger.error('Failed to broadcast AI response', { phoneNumber, error: error.message });
+          logger.error('Failed to broadcast AI response', {
+            phoneNumber,
+            sessionId: result.sessionId,
+            error: error.message
+          });
         }
-      });
+      }
 
     } catch (error) {
       logger.error('Error processing AI response', error);
