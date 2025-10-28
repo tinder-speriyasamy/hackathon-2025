@@ -381,6 +381,7 @@ app.post('/webhooks/sms', async (req, res) => {
       const otherParticipants = result.participants.filter(p => p !== senderPhone);
 
       if (otherParticipants.length > 0) {
+        const broadcastStartTime = Date.now();
         logger.info('Broadcasting user message to other participants', {
           sessionId: result.sessionId,
           sender: senderName,
@@ -391,8 +392,8 @@ app.post('/webhooks/sms', async (req, res) => {
         // Format message with sender name
         const formattedUserMessage = userMessage ? `*${senderName}:* ${userMessage}` : `*${senderName}:*`;
 
-        // Broadcast to other participants and WAIT for all to complete
-        for (const phoneNumber of otherParticipants) {
+        // Broadcast to other participants and WAIT for all to complete before sending AI response
+        const broadcastPromises = otherParticipants.map(async (phoneNumber) => {
           try {
             const messageOptions = {
               from: process.env.TWILIO_WHATSAPP_NUMBER,
@@ -415,7 +416,17 @@ app.post('/webhooks/sms', async (req, res) => {
           } catch (error) {
             logger.error('Failed to broadcast user message', { phoneNumber, error: error.message });
           }
-        }
+        });
+
+        // Wait for ALL user message broadcasts to complete
+        await Promise.all(broadcastPromises);
+
+        const broadcastDuration = Date.now() - broadcastStartTime;
+        logger.info('✅ User message broadcast complete', {
+          sessionId: result.sessionId,
+          duration: `${broadcastDuration}ms`,
+          participantCount: otherParticipants.length
+        });
       }
 
       // If message was already sent via Conversations API, just acknowledge

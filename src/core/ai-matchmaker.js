@@ -100,9 +100,35 @@ Conversation style:
 - Be conversational, like texting a friend
 - Use their name when appropriate
 - Acknowledge and build on what they say
-- When addressing the group, make it clear: "Hey [Name], friends - question for you..."
 
-Remember: This is happening over WhatsApp in a group chat, so keep it casual and easy to read on mobile!`;
+IMPORTANT - Addressing People:
+- When responding to someone's answer, ONLY address THAT person (e.g., "Got it, Siva!")
+- ONLY list multiple names when you're asking a question to multiple people or giving a summary
+- DON'T start every message with everyone's names
+- Example GOOD: "Got it, Siva! What's your age?"
+- Example BAD: "Hey Siva, Sharmila — got it! What's your age?"
+- When switching to ask someone else, use their name: "Sharmila, what do you think about..."
+
+IMPORTANT - Message Formatting for WhatsApp:
+- Use line breaks to make messages easy to read on mobile
+- When listing profile info, put each field on a NEW LINE
+- Use blank lines to separate sections
+- Example of GOOD formatting:
+  "Hey Siva, Sharmila — profile summary:
+
+  Name: Siva
+  Gender: Male
+  Interested in: Women
+  School: UC Berkeley
+  Interests: Pop Culture & Movies & TV
+  Photo saved 📸
+
+  Sharmila says "He is a fantastic friend" — Siva, want to use that as your one-line highlight?"
+
+- Example of BAD formatting (don't do this):
+  "Hey Siva, Sharmila — profile summary: Name: Siva; Gender: Male; Interested in: Women; School: UC Berkeley; Interests: Pop Culture & Movies & TV; Photo saved 📸. Sharmila says..."
+
+Remember: This is happening over WhatsApp in a group chat, so keep it casual and easy to read on mobile with proper line breaks!`;
 
 /**
  * Redis helper functions with fallback to in-memory storage
@@ -387,12 +413,13 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
   );
   const fullSystemPrompt = `${MATCHMAKER_BASE_PROMPT}\n\n${actionInstructions}`;
 
-  logger.info('Generating AI response with actions', {
+  logger.info('🤖 Starting AI generation', {
     sessionId,
     phoneNumber,
     stage: session.stage,
     messageCount: session.messages.length,
-    participantCount: session.participants.length
+    participantCount: session.participants.length,
+    systemPromptLength: fullSystemPrompt.length
   });
 
   try {
@@ -405,6 +432,9 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
       return { role: m.role, content: m.content };
     });
 
+    // Track LLM timing
+    const llmStartTime = Date.now();
+
     const completion = await openaiClient.chat.completions.create({
       model: 'gpt-5-mini',
       messages: [
@@ -415,7 +445,14 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
       response_format: { type: "json_object" } // Request JSON response
     });
 
+    const llmDuration = Date.now() - llmStartTime;
     const aiResponse = completion.choices[0].message.content;
+
+    logger.info('⚡ LLM Response', {
+      duration: `${llmDuration}ms`,
+      tokens: completion.usage.total_tokens,
+      sessionId
+    });
 
     // Check for empty response
     if (!aiResponse || aiResponse.trim() === '') {
@@ -772,14 +809,17 @@ Message: *join ${newSessionId}*
   let currentSession = await getSessionData(sessionId);
   let profileCardImage = null;
   if (aiResult.actions && aiResult.actions.length > 0) {
+    const actionsStartTime = Date.now();
     logger.info('Executing AI actions', {
       sessionId,
       actionCount: aiResult.actions.length
     });
 
     for (const action of aiResult.actions) {
+      const actionStartTime = Date.now();
       try {
         const result = await executeAction(action, currentSession);
+        const actionDuration = Date.now() - actionStartTime;
 
         // Capture profile card image if generated
         if (result.profileCardImage) {
@@ -795,19 +835,29 @@ Message: *join ${newSessionId}*
           await setSession(sessionId, currentSession);
         }
 
-        logger.debug('Action executed', {
-          sessionId,
-          actionType: action.type,
-          success: result.success
+        logger.info('⚙️  Action Complete', {
+          action: action.type,
+          duration: `${actionDuration}ms`,
+          success: result.success,
+          sessionId
         });
       } catch (error) {
-        logger.error('Action execution failed', {
-          sessionId,
-          actionType: action.type,
-          error: error.message
+        const actionDuration = Date.now() - actionStartTime;
+        logger.error('❌ Action Failed', {
+          action: action.type,
+          duration: `${actionDuration}ms`,
+          error: error.message,
+          sessionId
         });
       }
     }
+
+    const totalActionsDuration = Date.now() - actionsStartTime;
+    logger.info('✅ All Actions Complete', {
+      totalDuration: `${totalActionsDuration}ms`,
+      actionCount: aiResult.actions.length,
+      sessionId
+    });
   }
 
   // Re-fetch session to get latest state
