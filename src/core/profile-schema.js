@@ -98,22 +98,18 @@ const PROFILE_SCHEMA = {
   interests: {
     type: 'array',
     required: true,
-    description: 'User\'s interests from predefined categories (minimum 2)',
+    description: 'User\'s interests (minimum 2)',
     categories: INTEREST_CATEGORIES,
     minCategories: 2,
     validate: (value) => {
+      // Simple validation: just check it's an array with at least 2 non-empty strings
       if (!Array.isArray(value)) return false;
       if (value.length < 2) return false;
 
-      // Check that all interests map to valid categories
-      return value.every(interest => {
-        if (typeof interest !== 'string') return false;
-        const interestLower = interest.toLowerCase();
-        return INTEREST_CATEGORIES.some(cat =>
-          cat.toLowerCase().includes(interestLower) ||
-          interestLower.includes(cat.toLowerCase())
-        );
-      });
+      // Check that all items are non-empty strings
+      return value.every(interest =>
+        typeof interest === 'string' && interest.trim().length > 0
+      );
     }
   }
 };
@@ -292,7 +288,7 @@ function mapInterestToCategory(interestText) {
     'Music': ['music', 'concerts', 'bands', 'singing', 'instruments', 'piano', 'guitar'],
     'Pop Culture': ['movies', 'tv', 'celebrity', 'pop', 'culture', 'trending'],
     'Outdoor & Nature': ['outdoor', 'nature', 'hiking', 'camping', 'beach', 'mountains', 'outdoors'],
-    'Movies & TV': ['movies', 'films', 'tv', 'television', 'shows', 'netflix', 'cinema'],
+    'Movies & TV': ['movies', 'films', 'tv', 'television', 'shows', 'netflix', 'cinema', 'watching'],
     'Nightlife & Social': ['nightlife', 'bars', 'clubs', 'parties', 'social', 'dancing'],
     'Beauty & Fashion': ['fashion', 'beauty', 'makeup', 'style', 'clothes', 'shopping'],
     'Hobbies & Crafts': ['hobbies', 'crafts', 'diy', 'knitting', 'sewing', 'crafting'],
@@ -301,7 +297,7 @@ function mapInterestToCategory(interestText) {
     'Gaming': ['gaming', 'games', 'video games', 'esports', 'playstation', 'xbox', 'pc'],
     'Technology': ['tech', 'technology', 'coding', 'programming', 'computers', 'gadgets'],
     'Food & Dining': ['food', 'cooking', 'dining', 'restaurants', 'cuisine', 'eating'],
-    'Travel & Adventure': ['travel', 'adventure', 'exploring', 'trips', 'vacation', 'backpacking'],
+    'Travel & Adventure': ['travel', 'adventure', 'exploring', 'trips', 'vacation', 'backpacking', 'driving', 'road trips', 'cars', 'motorcycles', 'biking'],
     'Social Causes & Activism': ['activism', 'volunteering', 'charity', 'causes', 'social justice'],
     'Fitness & Wellness': ['fitness', 'wellness', 'yoga', 'meditation', 'health', 'workout'],
     'Lifestyle': ['lifestyle', 'living', 'daily life', 'routine'],
