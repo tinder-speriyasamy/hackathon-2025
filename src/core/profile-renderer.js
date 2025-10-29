@@ -1,13 +1,39 @@
 /**
- * Profile Renderer
- * Generates beautiful profile card images from profile schema data
+ * Profile Renderer (DEPRECATED)
+ *
+ * ⚠️ DEPRECATED: This file contains legacy Puppeteer-based image generation code.
+ *
+ * The profile system has been migrated to URL-based interactive profiles:
+ * - Profile URL Manager: /src/services/profile-url-manager.js
+ * - Profile HTML Generator: /src/services/profile-html-generator.js
+ * - Profile Route: GET /profile/:sessionId in server.js
+ *
+ * This file is kept for backward compatibility with test files only.
+ * The escapeHtml and generateProfileHTML functions are preserved as utilities.
+ * The renderProfileCard function (Puppeteer-based) has been removed.
  */
 
-const puppeteer = require('puppeteer');
-const path = require('path');
-const fs = require('fs').promises;
 const logger = require('../utils/logger');
-const { uploadToR2 } = require('../utils/r2-storage');
+
+/**
+ * Escape HTML special characters to prevent HTML injection
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text safe for HTML
+ */
+function escapeHtml(text) {
+  if (!text || typeof text !== 'string') return text;
+
+  const htmlEscapeMap = {
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#x27;',
+    '/': '&#x2F;'
+  };
+
+  return text.replace(/[&<>"'/]/g, char => htmlEscapeMap[char]);
+}
 
 /**
  * Generate HTML template for profile card
@@ -39,34 +65,34 @@ function generateProfileHTML(profileData) {
   // Build education display
   let educationDisplay = '';
   if (schools.length > 0) {
-    educationDisplay = schools[0];
-    if (major) educationDisplay += ` · ${major}`;
+    educationDisplay = escapeHtml(schools[0]);
+    if (major) educationDisplay += ` · ${escapeHtml(major)}`;
   } else if (education_level) {
-    educationDisplay = education_level;
-    if (major) educationDisplay += ` · ${major}`;
+    educationDisplay = escapeHtml(education_level);
+    if (major) educationDisplay += ` · ${escapeHtml(major)}`;
   }
 
   // Build interests display
   const interestsDisplay = interests.length > 0
-    ? interests.slice(0, 8).map(interest => `<span class="interest-tag">${interest}</span>`).join('')
+    ? interests.slice(0, 8).map(interest => `<span class="interest-tag">${escapeHtml(interest)}</span>`).join('')
     : '';
 
   // Build prompts display
   const promptsDisplay = prompts && prompts.length > 0
     ? prompts.map(prompt => `
       <div class="prompt-card">
-        <div class="prompt-question">${prompt.question}</div>
-        <div class="prompt-answer">${prompt.answer}</div>
+        <div class="prompt-question">${escapeHtml(prompt.question)}</div>
+        <div class="prompt-answer">${escapeHtml(prompt.answer)}</div>
       </div>
     `).join('')
     : '';
 
   // Build info badges (height, orientation, relationship intent)
   const infoBadges = [];
-  if (height) infoBadges.push(`<div class="info-badge"><span class="badge-icon">📏</span>${height}</div>`);
-  if (sexual_orientation) infoBadges.push(`<div class="info-badge"><span class="badge-icon">✨</span>${sexual_orientation}</div>`);
-  if (relationship_intent) infoBadges.push(`<div class="info-badge"><span class="badge-icon">💫</span>${relationship_intent}</div>`);
-  if (pets && pets.length > 0) infoBadges.push(`<div class="info-badge"><span class="badge-icon">🐾</span>${pets.join(', ')}</div>`);
+  if (height) infoBadges.push(`<div class="info-badge"><span class="badge-icon">📏</span>${escapeHtml(height)}</div>`);
+  if (sexual_orientation) infoBadges.push(`<div class="info-badge"><span class="badge-icon">✨</span>${escapeHtml(sexual_orientation)}</div>`);
+  if (relationship_intent) infoBadges.push(`<div class="info-badge"><span class="badge-icon">💫</span>${escapeHtml(relationship_intent)}</div>`);
+  if (pets && pets.length > 0) infoBadges.push(`<div class="info-badge"><span class="badge-icon">🐾</span>${escapeHtml(pets.join(', '))}</div>`);
 
   const infoBadgesDisplay = infoBadges.join('');
 
@@ -307,7 +333,7 @@ function generateProfileHTML(profileData) {
     <!-- Full Bleed Photo Background -->
     <div class="photo-container">
       ${photo ?
-        `<img src="${photoUrl}" alt="${name}" class="photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
+        `<img src="${photoUrl}" alt="${escapeHtml(name)}" class="photo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
          <div class="placeholder-photo" style="display:none;">📷</div>` :
         `<div class="placeholder-photo">📷</div>`
       }
@@ -321,13 +347,13 @@ function generateProfileHTML(profileData) {
 
     <!-- Content Overlay -->
     <div class="content-wrapper">
-      <div class="name-age">${name}, ${age}</div>
+      <div class="name-age">${escapeHtml(name)}, ${escapeHtml(age)}</div>
       ${educationDisplay ? `<div class="education-badge">${educationDisplay}</div>` : ''}
 
       <div class="content-section">
         ${bio ? `
         <div class="bio-section">
-          <div class="bio-text">${bio}</div>
+          <div class="bio-text">${escapeHtml(bio)}</div>
         </div>` : ''}
 
         ${promptsDisplay ? `
@@ -356,129 +382,37 @@ function generateProfileHTML(profileData) {
 }
 
 /**
- * Render profile card to image
- * @param {Object} profileData - Profile schema data
- * @returns {Promise<string>} Path to generated image file
+ * @deprecated renderProfileCard has been removed
+ * Use the new profile URL system instead:
+ * - profileUrlManager.createProfileUrl() in /src/services/profile-url-manager.js
  */
 async function renderProfileCard(profileData) {
-  let browser = null;
-
-  try {
-    // Log photo field details
-    const photoValue = profileData.photo || '';
-
-    logger.info('Starting profile card rendering', {
-      profileId: profileData.id || 'unknown',
-      name: profileData.name,
-      photoUrl: photoValue.substring(0, 100),
-      hasPhoto: !!photoValue
-    });
-
-    // Generate unique filename
-    const timestamp = Date.now();
-    const filename = `profile_card_${timestamp}.png`;
-
-    // Generate HTML
-    const html = generateProfileHTML(profileData);
-
-    // Launch Puppeteer
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-
-    const page = await browser.newPage();
-
-    // Set viewport to match card size
-    await page.setViewport({
-      width: 600,
-      height: 1100,
-      deviceScaleFactor: 2 // For retina quality
-    });
-
-    // Set content
-    await page.setContent(html, {
-      waitUntil: 'networkidle0'
-    });
-
-    // Take screenshot to buffer
-    const screenshotBuffer = await page.screenshot({
-      type: 'png',
-      omitBackground: false
-    });
-
-    await browser.close();
-    browser = null;
-
-    logger.info('Profile card screenshot captured', {
-      profileId: profileData.id || 'unknown',
-      bufferSize: screenshotBuffer.length
-    });
-
-    // Upload to R2
-    const sessionId = profileData.id || `profile_${timestamp}`;
-    const r2Url = await uploadToR2(
-      screenshotBuffer,
-      filename,
-      'image/png',
-      sessionId
-    );
-
-    logger.info('Profile card uploaded to R2 successfully', {
-      profileId: profileData.id || 'unknown',
-      r2Url: r2Url,
-      filesize: screenshotBuffer.length
-    });
-
-    // Return R2 URL
-    return r2Url;
-
-  } catch (error) {
-    logger.error('Failed to render profile card', {
-      error: error.message,
-      stack: error.stack,
-      profileData: JSON.stringify(profileData)
-    });
-
-    if (browser) {
-      await browser.close();
-    }
-
-    throw new Error(`Profile card rendering failed: ${error.message}`);
-  }
+  logger.error('renderProfileCard is deprecated - use profile URL system', {
+    profileId: profileData?.id
+  });
+  throw new Error(
+    'renderProfileCard is deprecated. Use profileUrlManager.createProfileUrl() instead. ' +
+    'See /src/services/profile-url-manager.js'
+  );
 }
 
 /**
- * Delete profile card image from R2
- * @param {string} imageUrl - R2 URL of the image
- * @returns {Promise<boolean>} True if deleted successfully
+ * @deprecated deleteProfileCard has been removed
+ * Profile URLs don't need deletion - profiles are stored in Redis permanently
  */
 async function deleteProfileCard(imageUrl) {
-  try {
-    const { deleteFromR2 } = require('../utils/r2-storage');
-
-    // Check if it's an R2 URL
-    if (imageUrl && imageUrl.startsWith('https://')) {
-      const success = await deleteFromR2(imageUrl);
-      if (success) {
-        logger.info('Profile card deleted from R2', { imageUrl });
-        return true;
-      }
-    }
-
-    logger.warn('Profile card deletion skipped - not an R2 URL', { imageUrl });
-    return false;
-  } catch (error) {
-    logger.error('Failed to delete profile card from R2', {
-      imageUrl,
-      error: error.message
-    });
-    return false;
-  }
+  logger.warn('deleteProfileCard is deprecated - profiles are now permanent URLs', {
+    imageUrl
+  });
+  return false;
 }
 
 module.exports = {
-  renderProfileCard,
+  // Utility functions (kept for backward compatibility)
+  escapeHtml,
   generateProfileHTML,
+
+  // Deprecated functions (throw errors to guide migration)
+  renderProfileCard,
   deleteProfileCard
 };

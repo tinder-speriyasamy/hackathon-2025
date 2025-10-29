@@ -15,7 +15,7 @@ const {
   updateField,
   initializeProfileSchema
 } = require('./profile-schema');
-const { renderProfileCard } = require('./profile-renderer');
+const profileUrlManager = require('../services/profile-url-manager');
 
 /**
  * Import constants from shared constants file
@@ -405,9 +405,14 @@ async function executeGenerateProfile(action, session) {
 
   // Generate the profile object
   const profileId = `profile_${session.sessionId}_${Date.now()}`;
+
+  // Include all photos from session data
+  const allPhotos = session.data?.photos || [];
+
   const generatedProfile = {
     id: profileId,
     ...session.profileSchema,
+    photos: allPhotos, // Include all photos for carousel
     createdAt: new Date().toISOString(),
     status: 'pending_review'
   };
@@ -416,38 +421,47 @@ async function executeGenerateProfile(action, session) {
     sessionId: session.sessionId,
     profileId,
     profileStatus: generatedProfile.status,
-    photoUrl: generatedProfile.photo?.substring(0, 100) || 'none'
+    photoUrl: generatedProfile.photo?.substring(0, 100) || 'none',
+    totalPhotos: allPhotos.length
   });
 
-  // Render profile card as image
-  logger.info('📸 Starting profile card rendering', {
+  // Create interactive profile URL
+  logger.info('🔗 Creating profile URL', {
     sessionId: session.sessionId,
     profileId,
-    profileName: generatedProfile.name
+    profileName: generatedProfile.name,
+    photoCount: allPhotos.length
   });
 
-  let profileCardImage = null;
+  let profileUrl = null;
   try {
-    const renderStartTime = Date.now();
-    profileCardImage = await renderProfileCard(generatedProfile);
-    const renderDuration = Date.now() - renderStartTime;
+    const urlStartTime = Date.now();
+    profileUrl = await profileUrlManager.createProfileUrl(
+      session.sessionId,
+      generatedProfile,
+      process.env.PUBLIC_DOMAIN || 'https://unterrified-bea-prolately.ngrok-free.dev'
+    );
+    const urlDuration = Date.now() - urlStartTime;
 
-    generatedProfile.profileCardImage = profileCardImage;
+    generatedProfile.profileUrl = profileUrl;
 
-    logger.info('✅ Profile card rendered successfully', {
+    logger.info('✅ Profile URL created successfully', {
       sessionId: session.sessionId,
       profileId,
-      imagePath: profileCardImage,
-      renderDuration: `${renderDuration}ms`
+      profileUrl,
+      urlDuration: `${urlDuration}ms`
     });
   } catch (error) {
-    logger.error('❌ Failed to render profile card', {
+    logger.error('❌ Failed to create profile URL', {
       sessionId: session.sessionId,
       profileId,
       error: error.message,
       stack: error.stack
     });
-    // Continue without the image - not a fatal error
+    return {
+      success: false,
+      error: `Failed to create profile URL: ${error.message}`
+    };
   }
 
   // Store generated profile in session
@@ -461,15 +475,16 @@ async function executeGenerateProfile(action, session) {
     sessionId: session.sessionId,
     profileId,
     stageTransition: `${oldStage} → ${STAGES.PROFILE_REVIEW}`,
-    hasProfileCard: !!profileCardImage,
-    profileStatus: generatedProfile.status
+    hasProfileUrl: !!profileUrl,
+    profileStatus: generatedProfile.status,
+    photoCount: allPhotos.length
   });
 
   return {
     success: true,
     action: 'profile_generated',
     profile: generatedProfile,
-    profileCardImage: profileCardImage,
+    profileUrl: profileUrl,
     message: 'Profile successfully generated and ready for review'
   };
 }

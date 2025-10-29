@@ -24,6 +24,8 @@ const { uploadToR2 } = require('./src/utils/r2-storage');
 const aiMatchmaker = require('./src/core/ai-matchmaker');
 const adminRoutes = require('./src/routes/admin-routes');
 const conversationManager = require('./src/twilio/conversation-manager');
+const profileUrlManager = require('./src/services/profile-url-manager');
+const { generateInteractiveProfileHTML } = require('./src/services/profile-html-generator');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -241,6 +243,135 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     twilioConfigured: !!twilioClient
   });
+});
+
+/**
+ * Serve interactive profile page
+ * GET /profile/:profileCode
+ */
+app.get('/profile/:profileCode', async (req, res) => {
+  const { profileCode } = req.params;
+
+  logger.info('Profile page requested', {
+    profileCode,
+    userAgent: req.get('user-agent'),
+    ip: req.ip
+  });
+
+  try {
+    // Retrieve profile data by unique code
+    const profileData = await profileUrlManager.getProfileDataByCode(profileCode);
+
+    if (!profileData) {
+      logger.warn('Profile not found', { profileCode });
+      return res.status(404).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Profile Not Found</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background: #000;
+              color: #fff;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              height: 100vh;
+              margin: 0;
+              text-align: center;
+              padding: 20px;
+            }
+            .container {
+              max-width: 400px;
+            }
+            h1 {
+              font-size: 48px;
+              margin-bottom: 16px;
+            }
+            p {
+              font-size: 18px;
+              color: rgba(255, 255, 255, 0.7);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>404</h1>
+            <p>Profile not found. It may have been deleted or the link is incorrect.</p>
+          </div>
+        </body>
+        </html>
+      `);
+    }
+
+    // Get all photos from session data (if available)
+    const allPhotos = profileData.photos || [];
+
+    logger.info('Rendering profile page', {
+      profileCode,
+      profileName: profileData.name,
+      photoCount: allPhotos.length
+    });
+
+    // Generate interactive HTML
+    const html = generateInteractiveProfileHTML(profileData, allPhotos);
+
+    // Send HTML response
+    res.type('text/html');
+    res.send(html);
+
+  } catch (error) {
+    logger.error('Failed to serve profile page', {
+      profileCode,
+      error: error.message,
+      stack: error.stack
+    });
+
+    res.status(500).send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error</title>
+        <style>
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #000;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            text-align: center;
+            padding: 20px;
+          }
+          .container {
+            max-width: 400px;
+          }
+          h1 {
+            font-size: 48px;
+            margin-bottom: 16px;
+          }
+          p {
+            font-size: 18px;
+            color: rgba(255, 255, 255, 0.7);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>Error</h1>
+          <p>Something went wrong loading this profile. Please try again later.</p>
+        </div>
+      </body>
+      </html>
+    `);
+  }
 });
 
 /**
@@ -481,19 +612,18 @@ app.post('/webhooks/sms', async (req, res) => {
             });
           }
 
-          // Send profile card image if available (after all text chunks)
-          if (result.profileCardImage) {
+          // Send profile URL if available (after all text chunks)
+          if (result.profileUrl) {
             await twilioClient.messages.create({
               from: process.env.TWILIO_WHATSAPP_NUMBER,
               to: `whatsapp:${phoneNumber}`,
-              body: '📸 Your profile card',
-              mediaUrl: [result.profileCardImage]
+              body: `✨ Your profile is ready! Check it out:\n${result.profileUrl}`
             });
 
-            logger.info('Sent profile card image', {
+            logger.info('Sent profile URL', {
               phoneNumber,
               sessionId: result.sessionId,
-              imagePath: result.profileCardImage
+              profileUrl: result.profileUrl
             });
           }
         } catch (error) {

@@ -19,6 +19,7 @@ const { Groq } = require('groq-sdk');
 const logger = require('../utils/logger');
 const redis = require('redis');
 const conversationManager = require('../twilio/conversation-manager');
+const profileUrlManager = require('../services/profile-url-manager');
 const {
   STAGES,
   ACTION_TYPES,
@@ -75,6 +76,10 @@ let redisClient = null;
 
     await redisClient.connect();
     logger.info('Redis client initialized');
+
+    // Initialize profile URL manager with Redis client
+    profileUrlManager.initialize(redisClient);
+    logger.info('Profile URL manager initialized');
   } catch (error) {
     logger.error('Failed to initialize Redis client', error);
     logger.warn('Session persistence disabled - using in-memory storage');
@@ -849,7 +854,7 @@ Message: *join ${newSessionId}*
 
   // Execute actions returned by AI
   let currentSession = await getSessionData(sessionId);
-  let profileCardImage = null;
+  let profileUrl = null;
   if (aiResult.actions && aiResult.actions.length > 0) {
     const actionsStartTime = Date.now();
     logger.info('Executing AI actions', {
@@ -863,9 +868,9 @@ Message: *join ${newSessionId}*
         const result = await executeAction(action, currentSession);
         const actionDuration = Date.now() - actionStartTime;
 
-        // Capture profile card image if generated
-        if (result.profileCardImage) {
-          profileCardImage = result.profileCardImage;
+        // Capture profile URL if generated
+        if (result.profileUrl) {
+          profileUrl = result.profileUrl;
         }
 
         // Log action to session history
@@ -912,7 +917,7 @@ Message: *join ${newSessionId}*
     participants: updatedSession ? updatedSession.participants.map(p => p.phoneNumber) : [],
     actions: aiResult.actions || [],
     reasoning: aiResult.reasoning,
-    profileCardImage: profileCardImage, // Include profile card if generated
+    profileUrl: profileUrl, // Include profile URL if generated
     sentViaConversations: false // Always use manual broadcast for proper name formatting
   };
 }
@@ -1193,6 +1198,14 @@ async function getAllSessions() {
   }
 }
 
+/**
+ * Get Redis client for external use
+ * @returns {Object|null} Redis client instance
+ */
+function getRedisClient() {
+  return redisClient;
+}
+
 module.exports = {
   handleMessage,
   getState,
@@ -1204,5 +1217,6 @@ module.exports = {
   joinSession,
   createSession,
   deleteSession,
-  deletePhoneMapping
+  deletePhoneMapping,
+  getRedisClient
 };
