@@ -30,7 +30,8 @@ services:
       - NODE_ENV=production
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+      - PUBLIC_DOMAIN=http://localhost:3000
+      - BASE_URL=http://localhost:3000
     restart: unless-stopped
     volumes:
       - ./server.log:/app/server.log
