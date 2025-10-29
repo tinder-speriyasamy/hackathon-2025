@@ -189,24 +189,17 @@ async function deletePhoneMapping(phoneNumber) {
 }
 
 /**
- * Generate a unique session code using two random words
- * @returns {string} Two-word session code (e.g., "taco-cloud")
+ * Generate a unique session code using random alphanumeric characters
+ * @returns {string} 5-character session code (e.g., "A7K2M")
  */
 function generateSessionCode() {
-  // List of short, easy-to-type words
-  const words = [
-    'blue', 'sky', 'tree', 'moon', 'star',
-    'wave', 'fire', 'rain', 'wind', 'leaf',
-    'rock', 'fish', 'bird', 'bear', 'lion',
-    'rose', 'snow', 'sun', 'sea', 'lake'
-  ];
+  // Generate random 5-character alphanumeric code
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let code = '';
 
-  // Pick two random words
-  const word1 = words[Math.floor(Math.random() * words.length)];
-  const word2 = words[Math.floor(Math.random() * words.length)];
-
-  // Join with dash for readability
-  const code = `${word1}-${word2}`;
+  for (let i = 0; i < 5; i++) {
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
 
   // Check if code already exists (unlikely but possible)
   if (sessions.has(code)) {
@@ -571,8 +564,8 @@ async function handleMessage(from, message, profileName = null, mediaUrls = []) 
   // Special commands
   const lowerMessage = message.toLowerCase().trim();
 
-  // Handle join command: "join ABC123" or "join ABC"
-  const joinMatch = lowerMessage.match(/^join\s+([A-Z0-9]{3,6})$/i);
+  // Handle join command: "join ABC12" (exactly 5 characters)
+  const joinMatch = lowerMessage.match(/^join\s+([A-Z0-9]{5})$/i);
   if (joinMatch) {
     const sessionId = joinMatch[1].toUpperCase();
     const success = await joinSession(sessionId, phoneNumber, profileName);
