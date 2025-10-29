@@ -450,6 +450,30 @@ app.post('/webhooks/sms', async (req, res) => {
   const isWhatsApp = req.body.From && req.body.From.startsWith('whatsapp:');
   const numMedia = parseInt(req.body.NumMedia) || 0;
 
+  // Check if this is a button response from a template
+  const buttonPayload = req.body.ButtonPayload;
+  const buttonText = req.body.ButtonText;
+
+  // If button was pressed, convert it to a text message for processing
+  let messageBody = req.body.Body || '';
+  if (buttonPayload) {
+    logger.info('Received button response', {
+      from: req.body.From,
+      buttonPayload,
+      buttonText
+    });
+    // Convert button payload to natural text for AI to process
+    const buttonResponses = {
+      'confirm_generate': 'Yes, generate my profile!',
+      'request_changes': 'I want to make some changes',
+      'restart_profile': 'Let\'s start over',
+      'commit_profile': 'Perfect! I love it',
+      'change_photo': 'I want to change the photo',
+      'edit_details': 'I want to edit some details'
+    };
+    messageBody = buttonResponses[buttonPayload] || buttonText || messageBody;
+  }
+
   // Handle media (photos) from WhatsApp
   const mediaUrls = [];
   if (numMedia > 0) {
@@ -492,7 +516,7 @@ app.post('/webhooks/sms', async (req, res) => {
     try {
       const result = await aiMatchmaker.handleMessage(
         req.body.From,
-        req.body.Body || '📷 [Photo sent]',
+        messageBody || '📷 [Photo sent]',
         req.body.ProfileName,
         mediaUrls
       );
@@ -569,6 +593,60 @@ app.post('/webhooks/sms', async (req, res) => {
         res.type('text/xml');
         res.send(twiml.toString());
         return;
+      }
+
+      // Check if AI wants to send a template message
+      if (result.templateType) {
+        logger.info('📋 Sending template message', {
+          sessionId: result.sessionId,
+          templateType: result.templateType,
+          variables: result.templateVariables
+        });
+
+        // Map template types to ContentSids from environment
+        const templateSids = {
+          'profile_confirmation': process.env.TWILIO_TEMPLATE_PROFILE_CONFIRMATION,
+          'profile_review': process.env.TWILIO_TEMPLATE_PROFILE_REVIEW
+        };
+
+        const contentSid = templateSids[result.templateType];
+
+        if (!contentSid) {
+          logger.error('Template ContentSid not configured', {
+            templateType: result.templateType,
+            availableTemplates: Object.keys(templateSids)
+          });
+          // Fallback to regular message
+        } else {
+          // Send template to all participants
+          for (const phoneNumber of result.participants) {
+            try {
+              await twilioClient.messages.create({
+                from: process.env.TWILIO_WHATSAPP_NUMBER,
+                to: `whatsapp:${phoneNumber}`,
+                contentSid: contentSid,
+                contentVariables: JSON.stringify(result.templateVariables || {})
+              });
+
+              logger.info('✅ Template message sent', {
+                phoneNumber,
+                sessionId: result.sessionId,
+                templateType: result.templateType
+              });
+            } catch (error) {
+              logger.error('Failed to send template message', {
+                phoneNumber,
+                templateType: result.templateType,
+                error: error.message
+              });
+            }
+          }
+
+          // Template sent, skip regular message broadcast
+          res.type('text/xml');
+          res.send(twiml.toString());
+          return;
+        }
       }
 
       // Format AI response with mchd prefix for clarity

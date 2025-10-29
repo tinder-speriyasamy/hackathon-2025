@@ -855,6 +855,8 @@ Message: *join ${newSessionId}*
   // Execute actions returned by AI
   let currentSession = await getSessionData(sessionId);
   let profileUrl = null;
+  let templateType = null;
+  let templateVariables = null;
   if (aiResult.actions && aiResult.actions.length > 0) {
     const actionsStartTime = Date.now();
     logger.info('Executing AI actions', {
@@ -871,6 +873,12 @@ Message: *join ${newSessionId}*
         // Capture profile URL if generated
         if (result.profileUrl) {
           profileUrl = result.profileUrl;
+        }
+
+        // Capture template info if action requested template sending
+        if (result.templateType) {
+          templateType = result.templateType;
+          templateVariables = result.variables || {};
         }
 
         // Log action to session history
@@ -918,6 +926,8 @@ Message: *join ${newSessionId}*
     actions: aiResult.actions || [],
     reasoning: aiResult.reasoning,
     profileUrl: profileUrl, // Include profile URL if generated
+    templateType: templateType, // Include template type if action requested template
+    templateVariables: templateVariables, // Include template variables
     sentViaConversations: false // Always use manual broadcast for proper name formatting
   };
 }

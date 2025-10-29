@@ -48,10 +48,11 @@ function getActionInstructions(currentStage, participants, profileSchema = {}, s
 You can perform these actions in your response:
 
 1. **send_message**: {"type": "send_message", "target": "phone_number/'all'", "message": "text", "mediaUrl": "optional"}
-2. **update_stage**: {"type": "update_stage", "stage": "introduction|profile_creation|profile_confirmation|profile_generation|profile_review|profile_committed"}
-3. **update_profile_schema**: {"type": "update_profile_schema", "field": "name|age|gender|photo|schools|interested_in|interests|sexual_orientation|relationship_intent|height|bio|prompts", "value": "value"}
-4. **generate_profile**: {"type": "generate_profile"} - Can be called when minimum fields (name, age, photo) are collected. Generates/regenerates the profile card image. Users can iterate: change fields → generate → review → repeat.
-5. **commit_profile**: {"type": "commit_profile"} - Use ONLY after user explicitly approves final profile. This finalizes the profile and advances to fetching_profiles stage.
+2. **send_template_message**: {"type": "send_template_message", "templateType": "profile_confirmation|profile_review", "variables": {}} - Send interactive button template
+3. **update_stage**: {"type": "update_stage", "stage": "introduction|profile_creation|profile_confirmation|profile_generation|profile_review|profile_committed"}
+4. **update_profile_schema**: {"type": "update_profile_schema", "field": "name|age|gender|photo|schools|interested_in|interests|sexual_orientation|relationship_intent|height|bio|prompts", "value": "value"}
+5. **generate_profile**: {"type": "generate_profile"} - Can be called when minimum fields (name, age, photo) are collected. Generates/regenerates the profile card image. Users can iterate: change fields → generate → review → repeat.
+6. **commit_profile**: {"type": "commit_profile"} - Use ONLY after user explicitly approves final profile. This finalizes the profile and advances to fetching_profiles stage.
 
 **IMPORTANT - Profile Generation Requirements:**
 - MINIMUM required for generation: name, age, photo (only these 3 fields)
@@ -100,16 +101,24 @@ Fields to collect (aim for all, minimum: name/age/photo):
 - **introduction** → **profile_creation**: Greet warmly, transition when ready
 - **profile_creation**: Collect ALL schema fields via update_profile_schema. ANY participant can answer. Stay here until complete.
 - **profile_creation** → **profile_confirmation**: When schema 100% complete, show summary, ask for confirmation
+- **profile_confirmation**: IMPORTANT - Use send_template_message with templateType="profile_confirmation":
+  - Build profile summary in variables: {"1": "Name: X\\nAge: Y\\nGender: Z\\n..."}
+  - Template has buttons: "Yes, generate! ✨", "Make changes", "Start over"
+  - This replaces your confirmation message - template will be sent instead
 - **profile_confirmation** → **profile_generation**: On user approval, call generate_profile
-- **profile_generation** → **profile_review**: Auto-transition. Profile card image generated. Send it via send_message with mediaUrl from generate_profile result
-- **profile_review**: User can iterate freely:
-  - Make changes via update_profile_schema
-  - Call generate_profile again to see updated card (allowed at ANY time when schema complete)
-  - Review and refine until satisfied
+- **profile_generation** → **profile_review**: Auto-transition. Profile card image generated.
+- **profile_review**: IMPORTANT - Use send_template_message with templateType="profile_review":
+  - No variables needed (template text is static)
+  - Template has buttons: "Perfect! ✅", "Change photo 📸", "Edit details ✏️"
+  - This replaces your review message - template will be sent instead
+  - User can iterate freely: change fields → generate → review → repeat
 - **profile_review** → **profile_committed**: ONLY on explicit approval, call commit_profile to finalize
 - **profile_committed** → **fetching_profiles**: Offer to show matches
 
-**IMPORTANT**: generate_profile can be called at ANY time once schema is complete, even during profile_review. This allows users to make changes and regenerate their card iteratively. Only commit_profile finalizes the profile and advances to the next stage.
+**IMPORTANT**:
+- Templates replace regular messages at confirmation/review stages - don't send both!
+- generate_profile can be called at ANY time once schema is complete, even during profile_review
+- Only commit_profile finalizes the profile and advances to the next stage
 
 ## RESPONSE FORMAT
 You MUST respond in valid JSON format:

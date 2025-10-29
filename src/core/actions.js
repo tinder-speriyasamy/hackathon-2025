@@ -50,6 +50,9 @@ async function executeAction(action, session, twilioSendMessage = null) {
     case ACTION_TYPES.SEND_MESSAGE:
       return await executeSendMessage(action, session, twilioSendMessage);
 
+    case ACTION_TYPES.SEND_TEMPLATE_MESSAGE:
+      return await executeSendTemplateMessage(action, session);
+
     case ACTION_TYPES.UPDATE_STAGE:
       return await executeUpdateStage(action, session);
 
@@ -160,6 +163,61 @@ async function executeSendMessage(action, session, twilioSendMessage) {
     recipients,
     message,
     mediaUrl
+  };
+}
+
+/**
+ * Execute send_template_message action
+ * Stores template information for server.js to send via Twilio Content API
+ *
+ * @param {Object} action - Action with templateType, variables
+ * @param {Object} session - Current session
+ * @returns {Object} Template message metadata for server to process
+ */
+async function executeSendTemplateMessage(action, session) {
+  const { templateType, variables = {} } = action;
+
+  logger.debug('Executing send_template_message action', {
+    sessionId: session.sessionId,
+    templateType,
+    variableCount: Object.keys(variables).length
+  });
+
+  if (!templateType) {
+    logger.error('Template type is required for send_template_message action', {
+      sessionId: session.sessionId
+    });
+    return { success: false, error: 'Template type is required' };
+  }
+
+  // Validate template type
+  const validTemplates = ['profile_confirmation', 'profile_review'];
+  if (!validTemplates.includes(templateType)) {
+    logger.error('Invalid template type', {
+      sessionId: session.sessionId,
+      templateType,
+      validTemplates
+    });
+    return {
+      success: false,
+      error: `Invalid template type. Valid: ${validTemplates.join(', ')}`
+    };
+  }
+
+  logger.info('📋 Template message prepared', {
+    sessionId: session.sessionId,
+    templateType,
+    variables: variables
+  });
+
+  // Return template info for server.js to handle actual sending
+  return {
+    success: true,
+    action: 'template_message_prepared',
+    templateType,
+    variables,
+    // Signal to server that this needs template sending
+    requiresTemplateSending: true
   };
 }
 

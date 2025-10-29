@@ -23,6 +23,7 @@ const STAGES = {
  */
 const ACTION_TYPES = {
   SEND_MESSAGE: 'send_message',
+  SEND_TEMPLATE_MESSAGE: 'send_template_message',
   UPDATE_STAGE: 'update_stage',
   UPDATE_PROFILE_SCHEMA: 'update_profile_schema',
   UPDATE_PROFILE_DATA: 'update_profile_data', // Deprecated, use UPDATE_PROFILE_SCHEMA
