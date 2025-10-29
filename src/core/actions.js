@@ -16,6 +16,8 @@ const {
   initializeProfileSchema
 } = require('./profile-schema');
 const profileUrlManager = require('../services/profile-url-manager');
+const demoProfileData = require('../../demo-profiles/demo-profile-data');
+const demoConfig = require('../../demo-config');
 
 /**
  * Import constants from shared constants file
@@ -68,6 +70,9 @@ async function executeAction(action, session, twilioSendMessage = null) {
 
     case ACTION_TYPES.FETCH_PROFILES:
       return await executeFetchProfiles(action, session);
+
+    case ACTION_TYPES.DAILY_DROP:
+      return await executeDailyDrop(action, session);
 
     default:
       logger.warn('Unknown action type', { type: action.type });
@@ -567,6 +572,133 @@ async function executeCommitProfile(action, session) {
     profile: session.committedProfile,
     message: 'Profile successfully committed!'
   };
+}
+
+/**
+ * Execute daily_drop action
+ * Selects 2 random demo profiles and returns them with catchy descriptions
+ */
+async function executeDailyDrop(action, session) {
+  logger.info('💌 Starting daily drop', {
+    sessionId: session.sessionId,
+    currentStage: session.stage
+  });
+
+  // Validate that profile is committed
+  if (session.stage !== STAGES.PROFILE_COMMITTED) {
+    logger.error('❌ Invalid stage for daily drop', {
+      sessionId: session.sessionId,
+      currentStage: session.stage,
+      requiredStage: STAGES.PROFILE_COMMITTED
+    });
+    return {
+      success: false,
+      error: 'Can only start daily drop after profile is committed'
+    };
+  }
+
+  // Get all demo profiles
+  const allProfiles = demoProfileData.profiles;
+
+  if (allProfiles.length < 2) {
+    logger.error('❌ Not enough demo profiles for daily drop', {
+      sessionId: session.sessionId,
+      profileCount: allProfiles.length
+    });
+    return {
+      success: false,
+      error: 'Not enough profiles for daily drop'
+    };
+  }
+
+  // Select 2 random profiles
+  const shuffled = [...allProfiles].sort(() => 0.5 - Math.random());
+  const selectedProfiles = shuffled.slice(0, 2);
+
+  // Generate catchy descriptions for each profile
+  const profilesWithDescriptions = selectedProfiles.map(profile => {
+    const fullProfile = demoConfig.profiles.find(p => p.sessionId === profile.sessionId);
+    return {
+      name: profile.name,
+      age: profile.age,
+      profileUrl: fullProfile?.profileUrl || '',
+      description: generateCatchyDescription(profile),
+      sessionId: profile.sessionId
+    };
+  });
+
+  // Store daily drop in session
+  if (!session.dailyDrops) {
+    session.dailyDrops = [];
+  }
+
+  const dailyDrop = {
+    timestamp: new Date().toISOString(),
+    profiles: profilesWithDescriptions,
+    userChoice: null
+  };
+
+  session.dailyDrops.push(dailyDrop);
+
+  logger.info('✅ Daily drop created successfully', {
+    sessionId: session.sessionId,
+    profileCount: profilesWithDescriptions.length,
+    profiles: profilesWithDescriptions.map(p => `${p.name}, ${p.age}`)
+  });
+
+  return {
+    success: true,
+    action: 'daily_drop',
+    profiles: profilesWithDescriptions,
+    message: 'Daily drop profiles selected!'
+  };
+}
+
+/**
+ * Generate a catchy one-line description from profile data
+ * @param {Object} profile - Profile object from demo-profile-data
+ * @returns {string} Catchy description
+ */
+function generateCatchyDescription(profile) {
+  const parts = [];
+
+  // Add a personality trait or bio snippet
+  if (profile.bio) {
+    const bioWords = profile.bio.split('.')[0].split(',');
+    if (bioWords.length > 0) {
+      parts.push(bioWords[0].trim());
+    }
+  }
+
+  // Add interests or hobbies
+  if (profile.interests && profile.interests.length > 0) {
+    const interest = profile.interests[0];
+    parts.push(`loves ${interest}`);
+  }
+
+  // Add pets if available
+  if (profile.pets && profile.pets.length > 0) {
+    parts.push(`has a ${profile.pets[0]}`);
+  }
+
+  // Add a quirky detail from prompts
+  if (profile.prompts && profile.prompts.length > 0) {
+    const weakness = profile.prompts.find(p => p.question.includes('weakness'));
+    if (weakness && weakness.answer) {
+      parts.push(`weakness: ${weakness.answer}`);
+    }
+  }
+
+  // Join parts with "and" or commas
+  if (parts.length === 0) {
+    return profile.bio || 'An interesting person';
+  } else if (parts.length === 1) {
+    return parts[0];
+  } else if (parts.length === 2) {
+    return `${parts[0]} and ${parts[1]}`;
+  } else {
+    return `${parts.slice(0, -1).join(', ')}, and ${parts[parts.length - 1]}`;
+  }
 }
 
 /**
