@@ -18,3 +18,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+fly.toml
+DEPLOYMENT.md
+FLYIO_QUICKSTART.md
+QUICK_DEPLOY.md
+
