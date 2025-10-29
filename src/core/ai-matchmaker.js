@@ -67,8 +67,15 @@ try {
 let redisClient = null;
 (async () => {
   try {
+    // Support Docker Compose with environment variables, default to localhost for local dev
+    const redisHost = process.env.REDIS_HOST || '127.0.0.1';
+    const redisPort = process.env.REDIS_PORT || 6379;
+    const redisUrl = `redis://${redisHost}:${redisPort}`;
+
+    logger.info('Connecting to Redis', { url: redisUrl });
+
     redisClient = redis.createClient({
-      url: 'redis://localhost:6379'
+      url: redisUrl
     });
 
     redisClient.on('error', (err) => logger.error('Redis Client Error', err));

@@ -1,0 +1,42 @@
+services:
+  # Redis service with persistence
+  redis:
+    image: redis:7-alpine
+    container_name: hackathon-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --save 60 1 --loglevel warning --appendonly yes
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Node.js application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hackathon-app
+    ports:
+      - "3000:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PUBLIC_DOMAIN=http://localhost:3000
+      - BASE_URL=http://localhost:3000
+    restart: unless-stopped
+    volumes:
+      - ./server.log:/app/server.log
+
+# Named volume for Redis persistence
+volumes:
+  redis-data:
+    driver: local

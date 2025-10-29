@@ -29,7 +29,8 @@ const ACTION_TYPES = {
   UPDATE_PROFILE_DATA: 'update_profile_data', // Deprecated, use UPDATE_PROFILE_SCHEMA
   GENERATE_PROFILE: 'generate_profile',
   COMMIT_PROFILE: 'commit_profile',
-  FETCH_PROFILES: 'fetch_profiles'
+  FETCH_PROFILES: 'fetch_profiles',
+  DAILY_DROP: 'daily_drop'
 };
 
 module.exports = {
