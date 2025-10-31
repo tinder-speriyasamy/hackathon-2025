@@ -233,9 +233,16 @@
         .participant-item {
             display: flex;
             justify-content: space-between;
+            align-items: center;
             padding: 12px;
             background: #f9f9f9;
             border-radius: 6px;
+        }
+
+        .participant-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
 
         .participant-info {
@@ -391,6 +398,17 @@
         .btn-confirm:hover {
             background: #cc0000;
         }
+
+        .btn-remove-participant {
+            background: #ff9800;
+            color: white;
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .btn-remove-participant:hover {
+            background: #f57c00;
+        }
     </style>
 </head>
 <body>
@@ -446,10 +464,27 @@
         </div>
     </div>
 
+    <div class="modal" id="removeParticipantModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>⚠️ Remove Participant</h3>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to remove <strong id="removeParticipantName"></strong> from session <strong id="removeSessionId"></strong>?</p>
+                <p>This will remove their phone mapping and they will no longer receive messages from this session.</p>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-cancel" onclick="closeRemoveParticipantModal()">Cancel</button>
+                <button class="btn btn-confirm" onclick="confirmRemoveParticipant()">Remove</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let sessions = [];
         let expandedSession = null;
         let sessionToDelete = null;
+        let participantToRemove = null;
 
         async function loadData() {
             await Promise.all([loadStats(), loadSessions()]);
@@ -556,15 +591,20 @@
                     const session = data.session;
                     detailsEl.innerHTML = `
                         <div class="detail-section">
-                            <h4>Participants</h4>
+                            <h4>Participants (${session.participants.length})</h4>
                             <div class="participants-list">
                                 ${session.participants.map(p => `
                                     <div class="participant-item">
-                                        <div class="participant-info">
-                                            <span class="participant-name">${p.name}</span>
-                                            <span class="participant-phone">${p.phoneNumber}</span>
+                                        <div class="participant-left">
+                                            <div class="participant-info">
+                                                <span class="participant-name">${p.name}</span>
+                                                <span class="participant-phone">${p.phoneNumber}</span>
+                                            </div>
+                                            <span class="participant-role role-${p.role}">${p.role}</span>
                                         </div>
-                                        <span class="participant-role role-${p.role}">${p.role}</span>
+                                        <button class="btn btn-remove-participant" onclick="openRemoveParticipantModal('${sessionId}', '${p.phoneNumber}', '${p.name.replace(/'/g, "\\'")}')">
+                                            Remove
+                                        </button>
                                     </div>
                                 `).join('')}
                             </div>
@@ -630,6 +670,44 @@
             } catch (error) {
                 console.error('Error deleting session:', error);
                 alert('Error deleting session. Please try again.');
+            }
+        }
+
+        function openRemoveParticipantModal(sessionId, phoneNumber, participantName) {
+            participantToRemove = { sessionId, phoneNumber, participantName };
+            document.getElementById('removeParticipantName').textContent = participantName;
+            document.getElementById('removeSessionId').textContent = sessionId;
+            document.getElementById('removeParticipantModal').classList.add('visible');
+        }
+
+        function closeRemoveParticipantModal() {
+            participantToRemove = null;
+            document.getElementById('removeParticipantModal').classList.remove('visible');
+        }
+
+        async function confirmRemoveParticipant() {
+            if (!participantToRemove) return;
+
+            const { sessionId, phoneNumber, participantName } = participantToRemove;
+
+            try {
+                const response = await fetch(`/admin/api/sessions/${sessionId}/participants/${encodeURIComponent(phoneNumber)}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    closeRemoveParticipantModal();
+                    // Reload the session details to show updated participant list
+                    await loadSessionDetails(sessionId);
+                    // Refresh stats
+                    await loadStats();
+                } else {
+                    alert('Error removing participant: ' + data.error);
+                }
+            } catch (error) {
+                console.error('Error removing participant:', error);
+                alert('Error removing participant. Please try again.');
             }
         }
 

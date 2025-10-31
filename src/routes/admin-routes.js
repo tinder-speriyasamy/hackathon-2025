@@ -122,6 +122,81 @@ router.delete('/api/sessions/:sessionId', async (req, res) => {
 });
 
 /**
+ * Remove a single participant from a session
+ * DELETE /admin/api/sessions/:sessionId/participants/:phoneNumber
+ */
+router.delete('/api/sessions/:sessionId/participants/:phoneNumber', async (req, res) => {
+  try {
+    const { sessionId, phoneNumber } = req.params;
+
+    // Get session first
+    const session = await aiMatchmaker.getSessionById(sessionId);
+
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        error: 'Session not found'
+      });
+    }
+
+    // Find the participant
+    const participantIndex = session.participants.findIndex(p => p.phoneNumber === phoneNumber);
+
+    if (participantIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        error: 'Participant not found in this session'
+      });
+    }
+
+    const participant = session.participants[participantIndex];
+
+    // Check if this is the last participant
+    if (session.participants.length === 1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot remove the last participant. Delete the session instead.'
+      });
+    }
+
+    // Remove participant from the session
+    session.participants.splice(participantIndex, 1);
+
+    // If removing the creator, update createdBy to another participant
+    if (session.createdBy === phoneNumber && session.participants.length > 0) {
+      session.createdBy = session.participants[0].phoneNumber;
+    }
+
+    // If removing the primary user, clear primary user
+    if (session.primaryUser && session.primaryUser.phoneNumber === phoneNumber) {
+      session.primaryUser = null;
+    }
+
+    // Delete phone mapping for removed participant
+    await aiMatchmaker.deletePhoneMapping(phoneNumber);
+
+    // Save updated session (using the Redis client via getSessionById/setSession pattern)
+    const redisClient = aiMatchmaker.getRedisClient();
+    if (redisClient && redisClient.isOpen) {
+      await redisClient.set(`session:${sessionId}`, JSON.stringify(session));
+    }
+
+    res.json({
+      success: true,
+      message: `Participant ${participant.name} (${phoneNumber}) removed from session ${sessionId}`,
+      remainingParticipants: session.participants.length
+    });
+  } catch (error) {
+    console.error('Error removing participant:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to remove participant',
+      message: error.message
+    });
+  }
+});
+
+/**
  * Get Redis stats
  * GET /admin/api/stats
  */
