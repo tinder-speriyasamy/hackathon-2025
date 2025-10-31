@@ -602,6 +602,12 @@ app.post('/webhooks/sms', async (req, res) => {
       }
 
       // Check if AI wants to send a template message
+      logger.debug('Checking for template message', {
+        hasTemplateType: !!result.templateType,
+        templateType: result.templateType,
+        sessionId: result.sessionId
+      });
+
       if (result.templateType) {
         logger.info('📋 Sending template message', {
           sessionId: result.sessionId,

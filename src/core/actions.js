@@ -220,7 +220,7 @@ async function executeSendTemplateMessage(action, session) {
     success: true,
     action: 'template_message_prepared',
     templateType,
-    variables,
+    templateVariables: variables,  // Changed: server.js expects templateVariables
     // Signal to server that this needs template sending
     requiresTemplateSending: true
   };

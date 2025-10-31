@@ -878,7 +878,12 @@ Message: *join ${newSessionId}*
         // Capture template info if action requested template sending
         if (result.templateType) {
           templateType = result.templateType;
-          templateVariables = result.variables || {};
+          templateVariables = result.templateVariables || {};
+          logger.debug('Template info captured from action', {
+            templateType,
+            variableCount: Object.keys(templateVariables).length,
+            sessionId: currentSession.sessionId
+          });
         }
 
         // Log action to session history
