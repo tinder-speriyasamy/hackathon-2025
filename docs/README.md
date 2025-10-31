@@ -5,7 +5,12 @@ A dating app onboarding experience using SMS group chats with friends + AI match
 ## 📚 Documentation
 
 ### **AI System Documentation** (NEW!)
-- **[System Overview](./AI_SYSTEM_OVERVIEW.md)** - 5-minute introduction to the AI system ⭐ **START HERE**
+
+**For Leadership (CTOs, VPs of Product):**
+- **[Executive Summary](./AI_EXECUTIVE_SUMMARY.md)** - What makes this an AI agent, not a chatbot 🎯 **START HERE**
+
+**For Technical Teams:**
+- **[System Overview](./AI_SYSTEM_OVERVIEW.md)** - 5-minute technical introduction
 - **[AI Architecture](./AI_ARCHITECTURE.md)** - Complete guide to prompts, actions, and state management
 - **[Quick Reference](./AI_QUICK_REFERENCE.md)** - Fast lookup for common tasks and patterns
 - **[Flow Diagrams](./AI_FLOW_DIAGRAMS.md)** - Visual representations of system flows

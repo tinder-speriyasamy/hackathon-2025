@@ -1,5 +1,7 @@
 # AI Architecture: Prompting, Actions, and State Management
 
+> **Quick Links**: [Executive Summary](./AI_EXECUTIVE_SUMMARY.md) (for leadership) • [System Overview](./AI_SYSTEM_OVERVIEW.md) (5-min intro) • [Quick Reference](./AI_QUICK_REFERENCE.md) (developer guide)
+
 ## Table of Contents
 1. [System Overview](#system-overview)
 2. [Prompt System](#prompt-system)

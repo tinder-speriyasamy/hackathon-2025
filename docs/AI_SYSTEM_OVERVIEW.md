@@ -2,6 +2,8 @@
 
 A concise explanation of how the AI prompting and action system works.
 
+> **For Leadership**: See the [Executive Summary](./AI_EXECUTIVE_SUMMARY.md) for a high-level overview of capabilities and business implications.
+
 ---
 
 ## What Is This System?
