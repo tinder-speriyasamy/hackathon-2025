@@ -456,7 +456,8 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     session.stage,
     session.participants,
     session.profileSchema || {},
-    session.data || {}
+    session.data || {},
+    session  // Pass full session for generatedProfile, dailyDrops, etc.
   );
   const fullSystemPrompt = `${MATCHMAKER_BASE_PROMPT}\n\n${actionInstructions}`;
 
@@ -466,7 +467,10 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     stage: session.stage,
     messageCount: session.messages.length,
     participantCount: session.participants.length,
-    systemPromptLength: fullSystemPrompt.length
+    systemPromptLength: fullSystemPrompt.length,
+    hasGeneratedProfile: !!session.generatedProfile,
+    hasDailyDrops: !!(session.dailyDrops && session.dailyDrops.length > 0),
+    dailyDropCount: session.dailyDrops?.length || 0
   });
 
   try {

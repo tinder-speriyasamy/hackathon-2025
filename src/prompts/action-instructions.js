@@ -25,9 +25,10 @@ const { STAGES } = require('../core/constants');
  * @param {Array} participants - Session participants
  * @param {Object} profileSchema - Current profile schema data
  * @param {Object} sessionData - Session data including photos
+ * @param {Object} session - Full session object (for generatedProfile, dailyDrops, etc.)
  * @returns {string} Formatted action instructions
  */
-function getActionInstructions(currentStage, participants, profileSchema = {}, sessionData = {}) {
+function getActionInstructions(currentStage, participants, profileSchema = {}, sessionData = {}, session = {}) {
   const participantList = participants.map(p => `${p.name} (${p.phoneNumber})`).join(', ');
   const missingFields = getMissingFields(profileSchema);
   const schemaComplete = isSchemaComplete(profileSchema);
@@ -42,6 +43,27 @@ function getActionInstructions(currentStage, participants, profileSchema = {}, s
   const photosDisplay = uploadedPhotos.length > 0
     ? uploadedPhotos.map((url, index) => `${index + 1}. ${url}`).join('\n')
     : 'No photos uploaded yet';
+
+  // Build generated profile display
+  const generatedProfileDisplay = session.generatedProfile
+    ? `Profile Generated: YES ✅
+Profile URL: ${session.generatedProfile.profileUrl || 'N/A'}
+Status: ${session.generatedProfile.status || 'unknown'}
+Generated At: ${session.generatedProfile.createdAt || 'unknown'}`
+    : 'No profile generated yet';
+
+  // Build daily drop display
+  let dailyDropDisplay = 'No daily drop yet';
+  if (session.dailyDrops && session.dailyDrops.length > 0) {
+    const latestDrop = session.dailyDrops[session.dailyDrops.length - 1];
+    dailyDropDisplay = `Latest Daily Drop (${latestDrop.timestamp}):
+${latestDrop.profiles.map((p, i) =>
+  `${i + 1}. ${p.name}, ${p.age} - ${p.description}
+   Profile: ${p.profileUrl}`
+).join('\n')}
+
+⚠️ IMPORTANT: You MUST present these profiles to the user IMMEDIATELY using the exact format from DAILY DROP FLOW instructions below.`;
+  }
 
   return `
 ## ACTIONS
@@ -67,6 +89,12 @@ Stage: ${currentStage} | Participants: ${participantList} | Schema Complete: ${s
 ${missingFields.length > 0 ? `Missing Fields:\n${missingFieldsDisplay}` : 'All required fields complete!'}
 
 ${uploadedPhotos.length > 0 ? `Uploaded Photos:\n${photosDisplay}` : 'No photos uploaded yet'}
+
+## GENERATED PROFILE STATUS
+${generatedProfileDisplay}
+
+## DAILY DROP RESULTS
+${dailyDropDisplay}
 
 ## PROFILE SCHEMA
 **IMPORTANT:** Try to collect ALL fields below for the best profile. However, you can generate a profile preview once you have name, age, and photo. These are the ONLY required fields for generation.
@@ -106,31 +134,36 @@ Fields to collect (aim for all, minimum: name/age/photo):
   - Build profile summary in variables: {"1": "Name: X\\nAge: Y\\nGender: Z\\n..."}
   - Template has buttons: "Yes, generate! ✨", "Make changes", "Start over"
   - This replaces your confirmation message - template will be sent instead
+  - WHEN USER RESPONDS with "Yes", "generate", or similar approval → call generate_profile action IMMEDIATELY
 - **profile_confirmation** → **profile_generation**: On user approval, call generate_profile
-- **profile_generation** → **profile_review**: Auto-transition. Profile card image generated.
+- **profile_generation** → **profile_review**: Auto-transition on generate_profile success. Profile generated.
 - **profile_review**: IMPORTANT - Use send_template_message with templateType="profile_review":
   - No variables needed (template text is static)
   - Template has buttons: "Perfect! ✅", "Change photo 📸", "Edit details ✏️"
   - This replaces your review message - template will be sent instead
   - User can iterate freely: change fields → generate → review → repeat
+  - WHEN USER RESPONDS with "Perfect", "love it", "looks good", or similar approval → call commit_profile action IMMEDIATELY
 - **profile_review** → **profile_committed**: ONLY on explicit approval, call commit_profile to finalize
-- **profile_committed** → **Daily Drop**: IMMEDIATELY call daily_drop action after commit_profile succeeds. This starts the matching game.
+- **profile_committed** → **Daily Drop**: IMMEDIATELY call daily_drop action after commit_profile succeeds. Then IMMEDIATELY present the profiles from DAILY DROP RESULTS section above.
 
 **DAILY DROP FLOW** (happens in profile_committed stage):
 1. Call daily_drop action - this returns 2 random profiles with descriptions and URLs
-2. Announce: "alright, daily drop time. I have 2 profiles for you [user's name]"
-3. Present each returned profile in this format:
-   - [Name], [Age], [catchy description from action result]
-   - [profile URL]
-4. Ask: "okay, what's the move? pick one:"
-   - 1. [First name]
-   - 2. [Second name]
+2. **USE THE DATA FROM "DAILY DROP RESULTS" SECTION ABOVE** - do NOT make up fake profiles
+3. Announce: "alright, daily drop time. I have 2 profiles for you [user's name]"
+4. Present each profile from DAILY DROP RESULTS in this exact format:
+   - [Name], [Age], [description from results]
+   - [profile URL from results]
+5. Ask: "okay, what's the move? pick one:"
+   - 1. [First name from results]
+   - 2. [Second name from results]
    - 3. Both
    - 4. Neither
-5. Wait for user's choice (they can type the number or name or "both"/"neither")
-6. When user chooses, respond with a fun comment about their choice (be creative!)
-7. End with: "sending likes now." (just conversational, no actual action needed)
-8. Conversation ends
+6. Wait for user's choice (they can type the number or name or "both"/"neither")
+7. When user chooses, respond with a fun comment about their choice (be creative!)
+8. End with: "sending likes now." (just conversational, no actual action needed)
+9. Conversation ends
+
+**CRITICAL**: Always use the REAL data from "DAILY DROP RESULTS" section. Never invent fake names, ages, or URLs.
 
 **IMPORTANT**:
 - Templates replace regular messages at confirmation/review stages - don't send both!
