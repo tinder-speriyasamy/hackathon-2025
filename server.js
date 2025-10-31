@@ -569,7 +569,13 @@ app.post('/webhooks/sms', async (req, res) => {
               mediaCount: numMedia
             });
           } catch (error) {
-            logger.error('Failed to broadcast user message', { phoneNumber, error: error.message });
+            logger.error('Failed to broadcast user message', {
+              phoneNumber,
+              error: error.message,
+              errorCode: error.code,
+              errorStatus: error.status,
+              moreInfo: error.moreInfo
+            });
           }
         });
 
@@ -708,7 +714,10 @@ app.post('/webhooks/sms', async (req, res) => {
           logger.error('Failed to broadcast AI response', {
             phoneNumber,
             sessionId: result.sessionId,
-            error: error.message
+            error: error.message,
+            errorCode: error.code,
+            errorStatus: error.status,
+            moreInfo: error.moreInfo
           });
         }
       }

@@ -2,6 +2,25 @@
 
 A dating app onboarding experience using SMS group chats with friends + AI matchmaker.
 
+## 📚 Documentation
+
+### **AI System Documentation** (NEW!)
+- **[System Overview](./AI_SYSTEM_OVERVIEW.md)** - 5-minute introduction to the AI system ⭐ **START HERE**
+- **[AI Architecture](./AI_ARCHITECTURE.md)** - Complete guide to prompts, actions, and state management
+- **[Quick Reference](./AI_QUICK_REFERENCE.md)** - Fast lookup for common tasks and patterns
+- **[Flow Diagrams](./AI_FLOW_DIAGRAMS.md)** - Visual representations of system flows
+
+### Integration & Setup
+- **[WhatsApp Setup](./WHATSAPP_SETUP.md)** - How to set up WhatsApp messaging
+- **[Deployment](../DEPLOYMENT.md)** - Deployment instructions
+- **[Quick Deploy](../QUICK_DEPLOY.md)** - Fast deployment guide
+
+### Status & Testing
+- **[Status](./STATUS.md)** - Current implementation status
+- **[Team Testing Guide](../TEAM_TESTING_GUIDE.md)** - How to test the system
+
+---
+
 ## Quick Start
 
 ```bash
