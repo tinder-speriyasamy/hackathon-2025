@@ -142,6 +142,20 @@ async function executeSendMessage(action, session, twilioSendMessage) {
     messagePreview: message.substring(0, 50) + (message.length > 50 ? '...' : '')
   });
 
+  // Save message to session history (for AI context)
+  if (!session.messages) {
+    session.messages = [];
+  }
+  session.messages.push({
+    role: 'assistant',
+    content: message
+  });
+
+  logger.debug('✅ Message saved to session history', {
+    sessionId: session.sessionId,
+    messageCount: session.messages.length
+  });
+
   // If twilioSendMessage function is provided, use it
   if (twilioSendMessage) {
     for (const phoneNumber of recipients) {
@@ -788,7 +802,7 @@ function logAction(session, action, result) {
 /**
  * Parse AI response and extract actions
  * @param {string} aiResponse - Raw AI response
- * @returns {Object} Parsed response with message and actions
+ * @returns {Object} Parsed response with actions (message field deprecated)
  */
 function parseAIResponse(aiResponse) {
   try {
@@ -805,16 +819,33 @@ function parseAIResponse(aiResponse) {
       keys: Object.keys(parsed)
     });
 
-    // Accept response if it has either message OR actions (or both)
-    if (parsed.message || (parsed.actions && Array.isArray(parsed.actions))) {
+    // New format: pure actions (message field deprecated)
+    // Old format: message + actions (still supported for backward compat)
+    if (parsed.actions && Array.isArray(parsed.actions)) {
       return {
-        message: parsed.message || '',
-        actions: parsed.actions || [],
+        message: parsed.message || '', // Empty if using new pure-actions format
+        actions: parsed.actions,
         reasoning: parsed.reasoning || ''
       };
     }
 
-    // If structure is completely wrong, log full response and treat as plain message
+    // Legacy: if only message field exists (no actions), wrap in send_message action
+    if (parsed.message) {
+      logger.warn('AI used deprecated message-only format, wrapping in send_message action');
+      return {
+        message: parsed.message,
+        actions: [
+          {
+            type: ACTION_TYPES.SEND_MESSAGE,
+            target: 'all',
+            message: parsed.message
+          }
+        ],
+        reasoning: parsed.reasoning || 'Legacy message format'
+      };
+    }
+
+    // If structure is completely wrong, log and create fallback send_message action
     logger.warn('AI JSON response missing required fields', {
       parsedKeys: Object.keys(parsed),
       responsePreview: aiResponse.substring(0, 200)
@@ -822,18 +853,30 @@ function parseAIResponse(aiResponse) {
 
     return {
       message: aiResponse,
-      actions: [],
-      reasoning: 'Plain text response'
+      actions: [
+        {
+          type: ACTION_TYPES.SEND_MESSAGE,
+          target: 'all',
+          message: aiResponse
+        }
+      ],
+      reasoning: 'Malformed response - wrapped in send_message'
     };
   } catch (error) {
-    // Not valid JSON, treat as plain message
-    logger.debug('AI response not in JSON format, treating as plain text', {
+    // Not valid JSON, wrap in send_message action
+    logger.debug('AI response not in JSON format, wrapping in send_message', {
       errorMessage: error.message,
       responsePreview: aiResponse.substring(0, 200)
     });
     return {
       message: aiResponse,
-      actions: [],
+      actions: [
+        {
+          type: ACTION_TYPES.SEND_MESSAGE,
+          target: 'all',
+          message: aiResponse
+        }
+      ],
       reasoning: 'Plain text response'
     };
   }

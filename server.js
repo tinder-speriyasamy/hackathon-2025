@@ -661,22 +661,48 @@ app.post('/webhooks/sms', async (req, res) => {
         }
       }
 
-      // Format AI response with mchd prefix for clarity
-      const formattedAIResponse = `*mchd:* ${result.response}`;
+      // Collect all messages to broadcast (from send_message actions or legacy result.response)
+      const messagesToBroadcast = [];
 
-      // Split long messages to fit WhatsApp's 1600 character limit
-      const messageChunks = splitLongMessage(formattedAIResponse);
+      // New model: Extract messages from send_message actions
+      const sendMessageActions = result.actions?.filter(a => a.type === 'send_message') || [];
+      if (sendMessageActions.length > 0) {
+        logger.info('Broadcasting messages from send_message actions', {
+          sessionId: result.sessionId,
+          messageCount: sendMessageActions.length
+        });
 
-      logger.info('Broadcasting AI response to all participants', {
-        sessionId: result.sessionId,
-        participantCount: result.participants.length,
-        messageLength: formattedAIResponse.length,
-        chunks: messageChunks.length,
-        senderPhone: senderPhone
-      });
+        for (const action of sendMessageActions) {
+          messagesToBroadcast.push(action.message);
+        }
+      }
+      // Legacy model: Fall back to result.response if no send_message actions
+      else if (result.response && result.response.trim() !== '') {
+        logger.debug('Using legacy message broadcast (deprecated)', {
+          sessionId: result.sessionId,
+          messageLength: result.response.length
+        });
+        messagesToBroadcast.push(result.response);
+      }
 
-      // Send all chunks to all participants via API (simpler and more reliable than TwiML split)
-      for (const phoneNumber of result.participants) {
+      // Broadcast all collected messages to all participants
+      if (messagesToBroadcast.length > 0) {
+        for (const message of messagesToBroadcast) {
+          // Format with mchd prefix for clarity
+          const formattedMessage = `*mchd:* ${message}`;
+
+          // Split long messages to fit WhatsApp's 1600 character limit
+          const messageChunks = splitLongMessage(formattedMessage);
+
+          logger.info('Broadcasting message to all participants', {
+            sessionId: result.sessionId,
+            participantCount: result.participants.length,
+            messageLength: formattedMessage.length,
+            chunks: messageChunks.length
+          });
+
+          // Send all chunks to all participants
+          for (const phoneNumber of result.participants) {
         try {
           logger.debug('Sending AI response to participant', {
             phoneNumber,
@@ -716,15 +742,42 @@ app.post('/webhooks/sms', async (req, res) => {
               profileUrl: result.profileUrl
             });
           }
-        } catch (error) {
-          logger.error('Failed to broadcast AI response', {
-            phoneNumber,
-            sessionId: result.sessionId,
-            error: error.message,
-            errorCode: error.code,
-            errorStatus: error.status,
-            moreInfo: error.moreInfo
-          });
+            } catch (error) {
+              logger.error('Failed to broadcast AI response', {
+                phoneNumber,
+                sessionId: result.sessionId,
+                error: error.message,
+                errorCode: error.code,
+                errorStatus: error.status,
+                moreInfo: error.moreInfo
+              });
+            }
+          }
+        }
+      }
+
+      // Send profile URL if available (after all messages sent)
+      if (result.profileUrl) {
+        for (const phoneNumber of result.participants) {
+          try {
+            await twilioClient.messages.create({
+              from: process.env.TWILIO_WHATSAPP_NUMBER,
+              to: `whatsapp:${phoneNumber}`,
+              body: `✨ Your profile is ready! Check it out:\n${result.profileUrl}`
+            });
+
+            logger.info('Sent profile URL', {
+              phoneNumber,
+              sessionId: result.sessionId,
+              profileUrl: result.profileUrl
+            });
+          } catch (error) {
+            logger.error('Failed to send profile URL', {
+              phoneNumber,
+              sessionId: result.sessionId,
+              error: error.message
+            });
+          }
         }
       }
 

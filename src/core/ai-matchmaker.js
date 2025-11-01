@@ -529,10 +529,9 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
       provider: LLM_PROVIDER
     });
 
-    // Save the conversational message to history
-    if (parsed.message) {
-      await saveMessage(sessionId, 'assistant', parsed.message);
-    }
+    // Note: Messages are now saved by send_message actions during execution
+    // The deprecated top-level "message" field is no longer auto-saved
+    // This allows for sequential message sending via multiple send_message actions
 
     return parsed;
 
