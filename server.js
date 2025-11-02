@@ -661,10 +661,19 @@ app.post('/webhooks/sms', async (req, res) => {
         }
       }
 
-      // Collect all messages to broadcast (from send_message actions or legacy result.response)
+      // Collect all messages to broadcast (from send_message actions, action broadcasts, or legacy result.response)
       const messagesToBroadcast = [];
 
-      // New model: Extract messages from send_message actions
+      // Priority 1: Messages from action execution (e.g., generate_profile auto-sends profile URL)
+      if (result.actionBroadcastMessages && result.actionBroadcastMessages.length > 0) {
+        logger.info('Broadcasting messages from action results', {
+          sessionId: result.sessionId,
+          messageCount: result.actionBroadcastMessages.length
+        });
+        messagesToBroadcast.push(...result.actionBroadcastMessages);
+      }
+
+      // Priority 2: Extract messages from send_message actions
       const sendMessageActions = result.actions?.filter(a => a.type === 'send_message') || [];
       if (sendMessageActions.length > 0) {
         logger.info('Broadcasting messages from send_message actions', {
@@ -676,8 +685,8 @@ app.post('/webhooks/sms', async (req, res) => {
           messagesToBroadcast.push(action.message);
         }
       }
-      // Legacy model: Fall back to result.response if no send_message actions
-      else if (result.response && result.response.trim() !== '') {
+      // Priority 3: Legacy model - Fall back to result.response if no send_message actions or action broadcasts
+      else if (result.response && result.response.trim() !== '' && messagesToBroadcast.length === 0) {
         logger.debug('Using legacy message broadcast (deprecated)', {
           sessionId: result.sessionId,
           messageLength: result.response.length
@@ -685,20 +694,40 @@ app.post('/webhooks/sms', async (req, res) => {
         messagesToBroadcast.push(result.response);
       }
 
+      // Log the final broadcast order
+      if (messagesToBroadcast.length > 0) {
+        logger.info('📤 Final Broadcast Order', {
+          sessionId: result.sessionId,
+          totalMessages: messagesToBroadcast.length,
+          messagesSequence: messagesToBroadcast.map((msg, index) => ({
+            index: index + 1,
+            messagePreview: msg.substring(0, 60) + (msg.length > 60 ? '...' : '')
+          }))
+        });
+      }
+
       // Broadcast all collected messages to all participants
       if (messagesToBroadcast.length > 0) {
-        for (const message of messagesToBroadcast) {
+        for (let msgIndex = 0; msgIndex < messagesToBroadcast.length; msgIndex++) {
+          const message = messagesToBroadcast[msgIndex];
+          const msgStartTime = Date.now();
+
           // Format with mchd prefix for clarity
           const formattedMessage = `*mchd:* ${message}`;
 
           // Split long messages to fit WhatsApp's 1600 character limit
           const messageChunks = splitLongMessage(formattedMessage);
 
-          logger.info('Broadcasting message to all participants', {
+          logger.info('📨 [TIMING] Starting broadcast for message', {
             sessionId: result.sessionId,
+            messageIndex: msgIndex + 1,
+            totalMessages: messagesToBroadcast.length,
+            messagePreview: message.substring(0, 60) + (message.length > 60 ? '...' : ''),
             participantCount: result.participants.length,
             messageLength: formattedMessage.length,
-            chunks: messageChunks.length
+            chunks: messageChunks.length,
+            timestamp: new Date().toISOString(),
+            timestampMs: msgStartTime
           });
 
           // Send all chunks to all participants
@@ -714,32 +743,31 @@ app.post('/webhooks/sms', async (req, res) => {
 
           // Send all message chunks
           for (let i = 0; i < messageChunks.length; i++) {
+            const chunkStartTime = Date.now();
+            logger.debug('🔄 [TIMING] Sending Twilio API call', {
+              sessionId: result.sessionId,
+              messageIndex: msgIndex + 1,
+              phoneNumber,
+              chunkIndex: i + 1,
+              timestamp: new Date().toISOString(),
+              timestampMs: chunkStartTime
+            });
+
             await twilioClient.messages.create({
               from: process.env.TWILIO_WHATSAPP_NUMBER,
               to: `whatsapp:${phoneNumber}`,
               body: messageChunks[i]
             });
 
-            logger.debug('Sent AI response chunk', {
-              phoneNumber,
+            const chunkEndTime = Date.now();
+            logger.debug('✅ [TIMING] Twilio API call completed', {
               sessionId: result.sessionId,
-              chunk: i + 1,
-              totalChunks: messageChunks.length
-            });
-          }
-
-          // Send profile URL if available (after all text chunks)
-          if (result.profileUrl) {
-            await twilioClient.messages.create({
-              from: process.env.TWILIO_WHATSAPP_NUMBER,
-              to: `whatsapp:${phoneNumber}`,
-              body: `✨ Your profile is ready! Check it out:\n${result.profileUrl}`
-            });
-
-            logger.info('Sent profile URL', {
+              messageIndex: msgIndex + 1,
               phoneNumber,
-              sessionId: result.sessionId,
-              profileUrl: result.profileUrl
+              chunkIndex: i + 1,
+              timestamp: new Date().toISOString(),
+              timestampMs: chunkEndTime,
+              durationMs: chunkEndTime - chunkStartTime
             });
           }
             } catch (error) {
@@ -753,33 +781,22 @@ app.post('/webhooks/sms', async (req, res) => {
               });
             }
           }
+
+          const msgEndTime = Date.now();
+          logger.info('✅ [TIMING] Completed broadcast for message', {
+            sessionId: result.sessionId,
+            messageIndex: msgIndex + 1,
+            totalMessages: messagesToBroadcast.length,
+            messagePreview: message.substring(0, 60) + (message.length > 60 ? '...' : ''),
+            timestamp: new Date().toISOString(),
+            timestampMs: msgEndTime,
+            totalDurationMs: msgEndTime - msgStartTime
+          });
         }
       }
 
-      // Send profile URL if available (after all messages sent)
-      if (result.profileUrl) {
-        for (const phoneNumber of result.participants) {
-          try {
-            await twilioClient.messages.create({
-              from: process.env.TWILIO_WHATSAPP_NUMBER,
-              to: `whatsapp:${phoneNumber}`,
-              body: `✨ Your profile is ready! Check it out:\n${result.profileUrl}`
-            });
-
-            logger.info('Sent profile URL', {
-              phoneNumber,
-              sessionId: result.sessionId,
-              profileUrl: result.profileUrl
-            });
-          } catch (error) {
-            logger.error('Failed to send profile URL', {
-              phoneNumber,
-              sessionId: result.sessionId,
-              error: error.message
-            });
-          }
-        }
-      }
+      // Note: Profile URL is now sent via actionBroadcastMessages (broadcastMessage from generate_profile action)
+      // No need for separate profile URL sending logic here
 
     } catch (error) {
       logger.error('Error processing AI response', error);

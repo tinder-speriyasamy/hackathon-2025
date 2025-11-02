@@ -896,11 +896,18 @@ const STAGES = {
   INTRODUCTION: 'introduction',
   PROFILE_CREATION: 'profile_creation',
   PROFILE_CONFIRMATION: 'profile_confirmation',
-  PROFILE_GENERATION: 'profile_generation',
   PROFILE_REVIEW: 'profile_review',
   PROFILE_COMMITTED: 'profile_committed',
   FETCHING_PROFILES: 'fetching_profiles'
 };
+
+const CORE_STAGE_FLOW = [
+  STAGES.INTRODUCTION,
+  STAGES.PROFILE_CREATION,
+  STAGES.PROFILE_CONFIRMATION,
+  STAGES.PROFILE_REVIEW,
+  STAGES.PROFILE_COMMITTED
+];
 ```
 
 ### Stage Flow Diagram
@@ -932,15 +939,6 @@ const STAGES = {
          │ User approves
          ▼
 ┌──────────────────┐
-│ PROFILE_         │  - Call generate_profile
-│ GENERATION       │  - Create profile card image
-│                  │  - Generate shareable URL
-│                  │  - Auto-transition (no wait)
-└────────┬─────────┘
-         │
-         │ Automatic
-         ▼
-┌──────────────────┐
 │ PROFILE_REVIEW   │  - Show generated profile
 │                  │  - User can iterate
 │                  │  - Change fields → regenerate
@@ -956,11 +954,10 @@ const STAGES = {
 │                  │  - User votes
 └────────┬─────────┘
          │
-         │ After daily drop voting
+         │ After daily drop voting (if surfacing matches)
          ▼
 ┌──────────────────┐
-│ FETCHING_        │  - Conversation ends
-│ PROFILES         │  - (Future: real matching)
+│ FETCHING_PROFILES│  - Optional: temporary while matches surface
 └──────────────────┘
 ```
 

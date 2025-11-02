@@ -7,7 +7,6 @@
  */
 
 const {
-  INTEREST_CATEGORIES,
   GENDER_OPTIONS,
   ORIENTATION_OPTIONS,
   RELATIONSHIP_INTENT_OPTIONS,
@@ -17,7 +16,93 @@ const {
   isSchemaComplete
 } = require('../core/profile-schema');
 
-const { STAGES } = require('../core/constants');
+const { STAGES, CORE_STAGE_FLOW, STAGE_SUMMARIES } = require('../core/constants');
+
+function formatValue(value) {
+  if (Array.isArray(value)) {
+    return value.length ? value.join(', ') : null;
+  }
+  if (typeof value === 'object' && value !== null) {
+    return JSON.stringify(value);
+  }
+  return value;
+}
+
+function buildProfileSummary(profileSchema = {}) {
+  const entries = [];
+  const fields = [
+    'name',
+    'age',
+    'gender',
+    'sexual_orientation',
+    'relationship_intent',
+    'education_level',
+    'schools',
+    'interests',
+    'interested_in',
+    'height',
+    'bio'
+  ];
+
+  for (const field of fields) {
+    const value = profileSchema[field];
+    if (value === null || value === undefined) continue;
+    const formatted = formatValue(value);
+    if (!formatted || (typeof formatted === 'string' && !formatted.trim())) continue;
+    entries.push(`${getFieldDisplayName(field)}: ${formatted}`);
+  }
+
+  if (profileSchema.prompts && profileSchema.prompts.length) {
+    profileSchema.prompts.forEach((prompt, index) => {
+      if (prompt?.question && prompt?.answer) {
+        entries.push(`Prompt ${index + 1} – ${prompt.question}: ${prompt.answer}`);
+      }
+    });
+  }
+
+  return entries.length ? entries.join('\n') : 'No profile data captured yet';
+}
+
+const STAGE_TIPS = {
+  [STAGES.GREETING]: `• Welcome the group warmly and explain the profile building flow.
+• Automatically infer names from messages, then confirm: "are we creating this for you, [name]?"
+• If someone nominates a different person, confirm the switch.
+• Once confirmed, transition with {"type":"update_stage","stage":"${STAGES.COLLECTING}"}.`,
+
+  [STAGES.COLLECTING]: `• Ask ONE question at a time, pairing acknowledgment + next question in single send_message.
+• Immediately store each answer with update_profile_schema.
+• When you have enough data (at minimum: name, age, photo), call the ATOMIC action {"type":"show_confirmation"}.
+• NEVER manually send templates or manually call update_stage to ${STAGES.CONFIRMING}.
+• The show_confirmation action does everything: builds recap + sends template + transitions stage automatically.`,
+
+  [STAGES.CONFIRMING]: `• You arrive here because show_confirmation was called - template already sent to user.
+• WAIT for user button response. Do NOT resend template unless explicitly requested.
+• User clicks "Yes, generate! ✨" or says positive confirmation: Call {"type":"generate_profile"} (this is atomic: generates + sends URL + transitions to ${STAGES.REVIEWING}).
+• User clicks "Make changes": Ask what to change, update with update_profile_schema, then call {"type":"show_confirmation"} again to refresh.`,
+
+  [STAGES.REVIEWING]: `• You arrive here because generate_profile was called - profile URL already sent to user.
+• WAIT for user feedback on the generated profile.
+• User says "perfect", "love it", or approves: Call {"type":"finalize_profile"} (this is atomic: commits + triggers daily_drop + transitions to ${STAGES.FINALIZED} + returns matches).
+• User requests edits: Update with update_profile_schema, then call {"type":"generate_profile"} again to regenerate.
+• NEVER manually call commit_profile, daily_drop, or update_stage - finalize_profile does it all.`,
+
+  [STAGES.FINALIZED]: `• You arrive here because finalize_profile was called - profile is committed and daily drop triggered.
+• Check "Daily Drop:" section above - if matches exist, present them immediately with enthusiasm.
+• Use the three-message pattern: hype intro → numbered list with URLs → choice prompt (1/2/both/neither).
+• Keep tone celebratory and forward-looking.`,
+
+  [STAGES.FETCHING_PROFILES]: `• Waiting on match results. Share whatever came back and keep conversation warm.`
+};
+
+function formatStageFlow() {
+  const lines = CORE_STAGE_FLOW.map((stage, index) => `${index + 1}. ${stage} — ${STAGE_SUMMARIES[stage]}`);
+  lines.push(`Optional: ${STAGES.FETCHING_PROFILES} — ${STAGE_SUMMARIES[STAGES.FETCHING_PROFILES]}`);
+  return lines.join('\n');
+}
+
+function getStageTip(stage) {
+  return STAGE_TIPS[stage] || 'Stay responsive and keep nudging the flow forward.';
+}
 
 /**
  * Get formatted action instructions for AI prompt
@@ -32,6 +117,7 @@ function getActionInstructions(currentStage, participants, profileSchema = {}, s
   const participantList = participants.map(p => `${p.name} (${p.phoneNumber})`).join(', ');
   const missingFields = getMissingFields(profileSchema);
   const schemaComplete = isSchemaComplete(profileSchema);
+  const primaryUserName = session.primaryUser?.name || 'Unknown';
 
   // Build missing fields display
   const missingFieldsDisplay = missingFields.length > 0
@@ -46,205 +132,110 @@ function getActionInstructions(currentStage, participants, profileSchema = {}, s
 
   // Build generated profile display
   const generatedProfileDisplay = session.generatedProfile
-    ? `Profile Generated: YES ✅
-Profile URL: ${session.generatedProfile.profileUrl || 'N/A'}
-Status: ${session.generatedProfile.status || 'unknown'}
-Generated At: ${session.generatedProfile.createdAt || 'unknown'}`
+    ? `Generated ✅ | Status: ${session.generatedProfile.status || 'unknown'} | URL: ${session.generatedProfile.profileUrl || 'N/A'}`
     : 'No profile generated yet';
 
-  // Build daily drop display
-  let dailyDropDisplay = 'No daily drop yet';
-  if (session.dailyDrops && session.dailyDrops.length > 0) {
+  const dailyDropDisplay = (() => {
+    if (!session.dailyDrops || session.dailyDrops.length === 0) {
+      return 'No daily drop yet';
+    }
     const latestDrop = session.dailyDrops[session.dailyDrops.length - 1];
-    dailyDropDisplay = `Latest Daily Drop (${latestDrop.timestamp}):
-${latestDrop.profiles.map((p, i) =>
-  `${i + 1}. ${p.name}, ${p.age} - ${p.description}
-   Profile: ${p.profileUrl}`
-).join('\n')}
+    return `Latest (${latestDrop.timestamp}):
+ ${latestDrop.profiles.map((p, i) => `${i + 1}. ${p.name}, ${p.age} — ${p.description}
+    ${p.profileUrl}`).join('\n')}
+ 
+ Present these immediately using the daily-drop message stack.`;
+   })();
 
-⚠️ IMPORTANT: You MUST present these profiles to the user IMMEDIATELY using the exact format from DAILY DROP FLOW instructions below.`;
-  }
+  const profileSummary = buildProfileSummary(session.profileSchema || {});
 
   return `
-## COMMUNICATION & ACTIONS
+## HOW TO RESPOND
+- Return JSON with an "actions" array (execution order) plus a short "reasoning" line.
+- Keep send_message + update_profile_schema paired when capturing data.
+- Combine acknowledgement + next question inside ONE send_message.
+- Reasoning stays one sentence about intent (e.g., "Stored age, asked for school").
 
-All interaction happens through ACTIONS that execute sequentially. You control the exact flow of messages and state changes.
+**CRITICAL - Atomic Actions Eliminate Coordination:**
+- NEVER manually send templates with send_template_message - atomic actions handle this.
+- NEVER manually coordinate multiple actions - use atomic actions instead:
+  - show_confirmation: Single action that builds recap + sends template + transitions stage
+  - generate_profile: Single action that generates + sends URL + transitions stage
+  - finalize_profile: Single action that commits + daily_drop + transitions stage + returns matches
+- Templates are sent automatically by atomic actions - you just call the action.
+- After atomic action completes, WAIT for user response before proceeding.
 
-### Available Actions:
+**Handling Validation Failures:**
+- If update_profile_schema fails for a non-essential field (like interests), continue the flow - don't get stuck.
+- Essential fields are: name, age, photo. If these exist, you can proceed to generate.
+- Photos in the "Photos:" section (above) satisfy the photo requirement - don't try to update a "profile photo" field.
+- Unknown field errors mean the field doesn't exist in the schema - skip it and move on.
 
-**1. send_message** - Send a text message to users
-Format: {"type": "send_message", "target": "all", "message": "your text here"}
-- Use this for ALL conversational responses
-- Can send multiple messages in sequence
-- Target is typically "all" to broadcast to all participants
+### Action Reference
 
-**2. send_template_message** - Send interactive button template
-Format: {"type": "send_template_message", "templateType": "profile_confirmation|profile_review", "variables": {...}}
-- Use for confirmation/review stages
-- Sends WhatsApp template with interactive buttons
-- Variables: profile_confirmation needs {"1": "summary"}, profile_review needs {}
+**Simple Actions** (manual, you control when to call):
+1. send_message — Conversational response. Usually target "all".
+2. update_profile_schema — Store field values. Pair with send_message when capturing data.
+3. update_stage — Only for GREETING → COLLECTING transition. Everything else uses atomic actions.
 
-**3. update_profile_schema** - Update a profile field
-Format: {"type": "update_profile_schema", "field": "name|age|gender|...", "value": "value"}
-- Use to store user's profile data
-- Field must be one of the schema fields below
+**Atomic Actions** (do everything automatically, just call once):
+4. show_confirmation — (ATOMIC) Builds profile recap + sends template + transitions to CONFIRMING. Call when ready to show recap.
+5. generate_profile — (ATOMIC) Generates profile + sends URL + transitions to REVIEWING. Needs name, age, photo.
+6. finalize_profile — (ATOMIC) Commits + triggers daily_drop + transitions to FINALIZED + returns matches. Call on final approval.
 
-**4. update_stage** - Change conversation stage
-Format: {"type": "update_stage", "stage": "introduction|profile_creation|..."}
-- Use to advance the conversation flow
-- Follow the STAGE FLOW rules below
+**Legacy Actions** (don't use these - atomic actions replace them):
+- send_template_message — DON'T USE. Atomic actions send templates automatically.
+- commit_profile — DON'T USE. Use finalize_profile instead.
+- daily_drop — DON'T USE. Called automatically by finalize_profile.
 
-**5. generate_profile** - Generate profile image and URL
-Format: {"type": "generate_profile"}
-- Requires minimum: name, age, photo
-- Creates interactive profile page
-- Can be called multiple times for iteration
+### Stage Flow (in order)
+${formatStageFlow()}
 
-**6. commit_profile** - Finalize the profile
-Format: {"type": "commit_profile"}
-- Use ONLY after explicit user approval
-- Locks in the profile
-- Required before daily_drop
+### Current Snapshot
+Stage: ${currentStage}
+Participants: ${participantList || 'N/A'}
+Primary User: ${primaryUserName}
+Schema Complete: ${schemaComplete ? 'YES ✅' : 'NO'}
 
-**7. daily_drop** - Get 2 random demo profiles
-Format: {"type": "daily_drop"}
-- Returns 2 profiles in DAILY DROP RESULTS section
-- Use immediately after commit_profile
-- Results available in next turn
+Missing Fields:
+${missingFields.length > 0 ? missingFieldsDisplay : 'All required fields complete! ✅'}
 
-### Profile Generation Requirements:
-- **MINIMUM**: name, age, photo (these 3 enable generate_profile)
-- **IDEAL**: Collect ALL schema fields for best results
-- **ITERATION**: Users can change fields and regenerate anytime
+Photos:
+${photosDisplay}
 
-## CURRENT STATE
-Stage: ${currentStage} | Participants: ${participantList} | Schema Complete: ${schemaComplete ? 'YES' : 'NO'}
-
-${missingFields.length > 0 ? `Missing Fields:\n${missingFieldsDisplay}` : 'All required fields complete!'}
-
-${uploadedPhotos.length > 0 ? `Uploaded Photos:\n${photosDisplay}` : 'No photos uploaded yet'}
-
-## GENERATED PROFILE STATUS
+Generated Profile:
 ${generatedProfileDisplay}
 
-## DAILY DROP RESULTS
+Profile Recap Data:
+${profileSummary}
+
+Daily Drop:
 ${dailyDropDisplay}
 
-## PROFILE SCHEMA
-**IMPORTANT:** Try to collect ALL fields below for the best profile. However, you can generate a profile preview once you have name, age, and photo. These are the ONLY required fields for generation.
+### Current Stage Focus
+${getStageTip(currentStage)}
 
-Fields to collect (aim for all, minimum: name/age/photo):
+### Schema Checklist
+- Essential to generate: name, age, photo ${uploadedPhotos.length > 0 ? `(latest: ${uploadedPhotos[uploadedPhotos.length - 1]})` : '(ask them to upload a photo)' }
+- Identity basics: gender (${GENDER_OPTIONS.join('/')}), interested_in (${GENDER_OPTIONS.join('/')}/Everyone), schools, height
+- Orientation & intent: sexual_orientation (${ORIENTATION_OPTIONS.join('/')}), relationship_intent (${RELATIONSHIP_INTENT_OPTIONS.join('/')})
+- Personality texture: interests (at least two), bio (10-500 chars), prompts using exactly "${PROFILE_PROMPTS[0]}", "${PROFILE_PROMPTS[1]}", "${PROFILE_PROMPTS[2]}"
+- Friends can supply any answer — weave their takes naturally
 
-1. **name**: User's first name
-2. **age**: User's age (number, 18-100)
-3. **gender**: ${GENDER_OPTIONS.join('/')}
-4. **photo**: ${uploadedPhotos.length > 0
-     ? `Use EXACT URL from above (starts with https://). Latest: ${uploadedPhotos[uploadedPhotos.length - 1]}`
-     : 'Ask user to upload. URL will appear above when uploaded.'}
-5. **schools**: Array of schools (e.g., ["Harvard", "MIT"])
-6. **interested_in**: ${GENDER_OPTIONS.join('/')}/Everyone
-7. **interests**: At least 2 interests. Ask naturally in conversation. Any non-empty strings work.
-8. **sexual_orientation**: ${ORIENTATION_OPTIONS.join('/')} - Ask: "How do you usually label your orientation?"
-9. **relationship_intent**: What they're looking for:
-   - "${RELATIONSHIP_INTENT_OPTIONS[0]}" (serious commitment)
-   - "${RELATIONSHIP_INTENT_OPTIONS[1]}" (primarily serious)
-   - "${RELATIONSHIP_INTENT_OPTIONS[2]}" (open to possibilities)
-   - "${RELATIONSHIP_INTENT_OPTIONS[3]}" (exploring)
-   Ask casually: "What are you open to?" and map their response.
-10. **height**: String format like "5'6\"" or "170cm". Ask naturally.
-11. **bio**: 10-500 characters. Create from conversation or ask friends to describe them.
-12. **prompts**: Array of 3 prompt answers. Use these EXACT questions:
-    - "${PROFILE_PROMPTS[0]}"
-    - "${PROFILE_PROMPTS[1]}"
-    - "${PROFILE_PROMPTS[2]}"
-    Each prompt should be: {"question": "prompt text", "answer": "their answer"}
-    Weave questions naturally into conversation. Friends can help answer!
+### Daily Drop Delivery
+When results exist, send three messages: hype intro, numbered list with URLs, then the choice prompt (1/2/both/neither). Never invent profiles.
 
-## STAGE FLOW & GUIDELINES
-
-### Stage Transitions:
-
-**introduction** → **profile_creation**
-- Actions: [send_message (greeting), update_stage]
-- Greet warmly, explain the process, transition when ready
-
-**profile_creation** (stay until schema complete)
-- Actions: [send_message (questions), update_profile_schema (store answers)]
-- Collect ALL schema fields - ANY participant can answer
-- Ask naturally, update schema fields as you learn info
-- When complete → transition to profile_confirmation
-
-**profile_confirmation**
-- **First time entering stage**: Send confirmation template
-  - Actions: [send_template_message (profile_confirmation)]
-  - Build summary in variables: {"1": "Name: X\\\\nAge: Y\\\\n..."}
-  - Template shows buttons: "Yes, generate! ✨", "Make changes", "Start over"
-- **When user clicks "Yes, generate!" or says "generate"**: Generate the profile NOW
-  - Actions: [generate_profile, send_message (share URL), update_stage to "profile_review"]
-  - Call generate_profile first - it returns the profile URL
-  - Send a message sharing the URL with the user
-  - Transition directly to profile_review stage
-
-**profile_generation** (deprecated - now handled in profile_confirmation)
-- No longer used - profile generation happens when user confirms in profile_confirmation
-
-**profile_review**
-- **First time entering stage**: Send review template
-  - Actions: [send_template_message (profile_review)]
-  - Template shows buttons: "Perfect! ✅", "Change photo 📸", "Edit details ✏️"
-- **If user wants changes**: Handle iterations
-  - Update profile fields → call generate_profile again → stay in profile_review
-  - Users can iterate as many times as needed
-- **When user clicks "Perfect! ✅" or says "love it"**: Commit and get daily drop
-  - Actions: [commit_profile, daily_drop, update_stage to "profile_committed"]
-  - Call commit_profile first to lock in the profile
-  - Call daily_drop immediately to get 2 demo profiles
-  - Update stage to profile_committed
-  - IMPORTANT: daily_drop results appear in DAILY DROP RESULTS section on NEXT turn
-
-**profile_committed** (after daily_drop has been called)
-- **Check DAILY DROP RESULTS section above**: If profiles exist there, present them NOW
-- Send these exact actions in sequence:
-  [
-    {"type": "send_message", "target": "all", "message": "alright, daily drop time. I have 2 profiles for you [name]"},
-    {"type": "send_message", "target": "all", "message": "1. [Name], [Age] - [description]\\\\n   [profile URL]\\\\n\\\\n2. [Name], [Age] - [description]\\\\n   [profile URL]"},
-    {"type": "send_message", "target": "all", "message": "okay, what's the move? pick one:\\\\n1. [First name]\\\\n2. [Second name]\\\\n3. Both\\\\n4. Neither"}
-  ]
-- Use EXACT data from DAILY DROP RESULTS - never invent fake profiles
-- When user responds: [send_message (comment), send_message ("sending likes now.")]
-
-## RESPONSE FORMAT
-
-You MUST respond with valid JSON containing an array of actions:
-
+### Response Format
 {
   "actions": [
-    {"type": "send_message", "target": "all", "message": "your response here"},
+    {"type": "send_message", "target": "all", "message": "ack + next question"},
     {"type": "update_profile_schema", "field": "age", "value": "25"}
   ],
-  "reasoning": "Why you chose these actions"
-}
-
-**Key Points:**
-- ALL communication must use send_message actions
-- Actions execute in the order you specify
-- You can send multiple messages sequentially
-- Keep messages conversational and friendly
-- Ask questions naturally, accept input from any participant
-- Progress stages when appropriate
-
-**Example Response:**
-{
-  "actions": [
-    {"type": "send_message", "target": "all", "message": "got it, you're 25!"},
-    {"type": "update_profile_schema", "field": "age", "value": "25"},
-    {"type": "send_message", "target": "all", "message": "next up: do you usually label your gender a certain way?"}
-  ],
-  "reasoning": "Stored age, asked for gender"
-}
-`;
+  "reasoning": "Stored age, asked for school"
+}`;
 }
 
 module.exports = {
-  getActionInstructions
+  getActionInstructions,
+  buildProfileSummary
 };

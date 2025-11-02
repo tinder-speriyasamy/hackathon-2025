@@ -3,78 +3,18 @@
  * Defines required fields and validation for dating profile creation
  */
 
-/**
- * Interest categories for profile
- */
-const INTEREST_CATEGORIES = [
-  'Sports & Athletics',
-  'Music',
-  'Pop Culture',
-  'Outdoor & Nature',
-  'Movies & TV',
-  'Nightlife & Social',
-  'Beauty & Fashion',
-  'Hobbies & Crafts',
-  'Arts & Creativity',
-  'Performing Arts',
-  'Gaming',
-  'Technology',
-  'Food & Dining',
-  'Travel & Adventure',
-  'Social Causes & Activism',
-  'Fitness & Wellness',
-  'Lifestyle',
-  'Business & Career'
-];
+const {
+  INTEREST_CATEGORIES,
+  GENDER_OPTIONS,
+  ORIENTATION_OPTIONS,
+  RELATIONSHIP_INTENT_OPTIONS,
+  EDUCATION_LEVEL_OPTIONS,
+  PROFILE_PROMPTS,
+  PET_TYPES
+} = require('./profile-options');
 
-/**
- * Gender options
- */
-const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary', 'Other'];
-
-/**
- * Sexual orientation options
- */
-const ORIENTATION_OPTIONS = ['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Asexual', 'Queer', 'Questioning'];
-
-/**
- * Relationship intent options
- */
-const RELATIONSHIP_INTENT_OPTIONS = [
-  'Long-term only',
-  'Long-term, open to short',
-  'Short-term, open to long',
-  'Still figuring it out'
-];
-
-/**
- * Education level options
- */
-const EDUCATION_LEVEL_OPTIONS = [
-  'High School',
-  'In College',
-  'Associate Degree',
-  'Bachelor\'s Degree',
-  'Master\'s Degree',
-  'PhD',
-  'Trade School',
-  'Prefer not to say'
-];
-
-/**
- * Fixed profile prompts
- * These are the questions that will be asked to build the profile
- */
-const PROFILE_PROMPTS = [
-  'My weakness is...',
-  'Perks of dating me...',
-  'People would describe me as...'
-];
-
-/**
- * Common pet types
- */
-const PET_TYPES = ['Dog', 'Cat', 'Bird', 'Fish', 'Reptile', 'Rabbit', 'Other'];
+const { normalizeFieldValue, mapInterestToCategory } = require('./field-normalizers');
+const logger = require('../utils/logger');
 
 /**
  * Profile schema definition with required fields
@@ -440,31 +380,18 @@ function updateField(profileSchema, fieldName, value) {
   }
 
   const fieldDef = PROFILE_SCHEMA[fieldName];
-  let processedValue = value;
+  const { value: normalizedValue } = normalizeFieldValue(fieldName, value);
 
-  // Special handling for age field - parse strings to numbers
-  if (fieldName === 'age') {
-    if (typeof value === 'string') {
-      const parsed = parseInt(value, 10);
-      if (isNaN(parsed)) {
-        return {
-          success: false,
-          error: `Invalid age value: "${value}" - must be a number`
-        };
-      }
-      processedValue = parsed;
-    } else if (typeof value === 'number') {
-      processedValue = value;
-    } else {
-      return {
-        success: false,
-        error: `Invalid age value type: expected number or string, got ${typeof value}`
-      };
-    }
+  // Special handling post-normalization for age to ensure numeric type
+  if (fieldName === 'age' && typeof normalizedValue !== 'number') {
+    return {
+      success: false,
+      error: `Invalid age value: "${value}" - must be a number`
+    };
   }
 
   // Validate value
-  if (!fieldDef.validate(processedValue)) {
+  if (!fieldDef.validate(normalizedValue)) {
     return {
       success: false,
       error: `Invalid value for ${getFieldDisplayName(fieldName)}`
@@ -472,62 +399,20 @@ function updateField(profileSchema, fieldName, value) {
   }
 
   // Update value
-  profileSchema[fieldName] = processedValue;
+  profileSchema[fieldName] = normalizedValue;
+
+  if (value !== normalizedValue) {
+    logger.debug('Stored normalized profile value', {
+      field: fieldName,
+      original: value,
+      stored: normalizedValue
+    });
+  }
 
   return {
     success: true,
     message: `Updated ${getFieldDisplayName(fieldName)}`
   };
-}
-
-/**
- * Map natural language interest to category
- * @param {string} interestText - Natural language interest description
- * @returns {string|null} Matched category or null
- */
-function mapInterestToCategory(interestText) {
-  if (!interestText || typeof interestText !== 'string') return null;
-
-  const textLower = interestText.toLowerCase();
-
-  // Direct match
-  for (const category of INTEREST_CATEGORIES) {
-    if (textLower.includes(category.toLowerCase())) {
-      return category;
-    }
-  }
-
-  // Keyword matching
-  const categoryKeywords = {
-    'Sports & Athletics': ['sports', 'athletic', 'gym', 'fitness', 'running', 'soccer', 'basketball', 'tennis', 'swimming'],
-    'Music': ['music', 'concerts', 'bands', 'singing', 'instruments', 'piano', 'guitar'],
-    'Pop Culture': ['movies', 'tv', 'celebrity', 'pop', 'culture', 'trending'],
-    'Outdoor & Nature': ['outdoor', 'nature', 'hiking', 'camping', 'beach', 'mountains', 'outdoors'],
-    'Movies & TV': ['movies', 'films', 'tv', 'television', 'shows', 'netflix', 'cinema', 'watching'],
-    'Nightlife & Social': ['nightlife', 'bars', 'clubs', 'parties', 'social', 'dancing'],
-    'Beauty & Fashion': ['fashion', 'beauty', 'makeup', 'style', 'clothes', 'shopping'],
-    'Hobbies & Crafts': ['hobbies', 'crafts', 'diy', 'knitting', 'sewing', 'crafting'],
-    'Arts & Creativity': ['art', 'creative', 'painting', 'drawing', 'design', 'photography'],
-    'Performing Arts': ['theater', 'theatre', 'acting', 'drama', 'dance', 'performance'],
-    'Gaming': ['gaming', 'games', 'video games', 'esports', 'playstation', 'xbox', 'pc'],
-    'Technology': ['tech', 'technology', 'coding', 'programming', 'computers', 'gadgets'],
-    'Food & Dining': ['food', 'cooking', 'dining', 'restaurants', 'cuisine', 'eating'],
-    'Travel & Adventure': ['travel', 'adventure', 'exploring', 'trips', 'vacation', 'backpacking', 'driving', 'road trips', 'cars', 'motorcycles', 'biking'],
-    'Social Causes & Activism': ['activism', 'volunteering', 'charity', 'causes', 'social justice'],
-    'Fitness & Wellness': ['fitness', 'wellness', 'yoga', 'meditation', 'health', 'workout'],
-    'Lifestyle': ['lifestyle', 'living', 'daily life', 'routine'],
-    'Business & Career': ['business', 'career', 'work', 'entrepreneurship', 'professional']
-  };
-
-  for (const [category, keywords] of Object.entries(categoryKeywords)) {
-    for (const keyword of keywords) {
-      if (textLower.includes(keyword)) {
-        return category;
-      }
-    }
-  }
-
-  return null;
 }
 
 module.exports = {

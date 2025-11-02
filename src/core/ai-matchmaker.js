@@ -473,6 +473,13 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
     dailyDropCount: session.dailyDrops?.length || 0
   });
 
+  // Log the dynamic prompt parts for debugging
+  logger.debug('📋 Dynamic Prompt Context', {
+    sessionId,
+    actionInstructionsLength: actionInstructions.length,
+    actionInstructions: actionInstructions
+  });
+
   try {
     // Format messages for AI with sender information
     const formattedMessages = session.messages.map(m => {
@@ -704,11 +711,23 @@ Message: *join ${sessionId}*
       session.data.photos = [];
     }
     session.data.photos.push(...mediaUrls);
+
+    // AUTO-SYNC: Update profileSchema.photo to latest uploaded photo
+    // This ensures validation passes and photo requirement is satisfied
+    if (!session.profileSchema) {
+      session.profileSchema = initializeProfileSchema();
+    }
+    // Use the latest uploaded photo as the primary profile photo
+    const latestPhoto = mediaUrls[mediaUrls.length - 1];
+    session.profileSchema.photo = latestPhoto;
+
     await setSession(sessionId, session);
-    logger.info('Stored photos in session', {
+    logger.info('Stored photos in session and synced to profile schema', {
       sessionId,
       phoneNumber,
-      photoCount: session.data.photos.length
+      photoCount: session.data.photos.length,
+      primaryPhoto: latestPhoto,
+      syncedToSchema: true
     });
   }
 
@@ -855,11 +874,27 @@ Message: *join ${newSessionId}*
     hasReasoning: !!aiResult.reasoning
   });
 
+  // Log the exact order of actions returned by AI
+  if (aiResult.actions && aiResult.actions.length > 0) {
+    logger.info('🔍 AI Actions Order (as returned by AI)', {
+      sessionId,
+      actionCount: aiResult.actions.length,
+      actionsSequence: aiResult.actions.map((action, index) => ({
+        index: index + 1,
+        type: action.type,
+        messagePreview: action.message ? action.message.substring(0, 60) + (action.message.length > 60 ? '...' : '') : undefined,
+        field: action.field,
+        stage: action.stage
+      }))
+    });
+  }
+
   // Execute actions returned by AI
   let currentSession = await getSessionData(sessionId);
   let profileUrl = null;
   let templateType = null;
   let templateVariables = null;
+  const actionBroadcastMessages = []; // Collect messages from actions
   if (aiResult.actions && aiResult.actions.length > 0) {
     const actionsStartTime = Date.now();
     logger.info('Executing AI actions', {
@@ -876,6 +911,16 @@ Message: *join ${newSessionId}*
         // Capture profile URL if generated
         if (result.profileUrl) {
           profileUrl = result.profileUrl;
+        }
+
+        // Capture broadcast message from action (e.g., generate_profile sends profile URL)
+        if (result.broadcastMessage) {
+          actionBroadcastMessages.push(result.broadcastMessage);
+          logger.debug('Broadcast message captured from action', {
+            actionType: action.type,
+            message: result.broadcastMessage,
+            sessionId: currentSession.sessionId
+          });
         }
 
         // Capture template info if action requested template sending
@@ -936,6 +981,7 @@ Message: *join ${newSessionId}*
     profileUrl: profileUrl, // Include profile URL if generated
     templateType: templateType, // Include template type if action requested template
     templateVariables: templateVariables, // Include template variables
+    actionBroadcastMessages: actionBroadcastMessages, // Include messages from actions (e.g., profile URL from generate_profile)
     sentViaConversations: false // Always use manual broadcast for proper name formatting
   };
 }

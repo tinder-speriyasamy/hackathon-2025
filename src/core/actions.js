@@ -77,6 +77,12 @@ async function executeAction(action, session, twilioSendMessage = null) {
     case ACTION_TYPES.DAILY_DROP:
       return await executeDailyDrop(action, session);
 
+    case ACTION_TYPES.SHOW_CONFIRMATION:
+      return await executeShowConfirmation(action, session);
+
+    case ACTION_TYPES.FINALIZE_PROFILE:
+      return await executeFinalizeProfile(action, session);
+
     default:
       logger.warn('Unknown action type', { type: action.type });
       return { success: false, error: 'Unknown action type' };
@@ -544,14 +550,14 @@ async function executeGenerateProfile(action, session) {
   // Store generated profile in session
   session.generatedProfile = generatedProfile;
 
-  // Update stage to review
+  // Update stage to reviewing
   const oldStage = session.stage;
-  session.stage = STAGES.PROFILE_REVIEW;
+  session.stage = STAGES.REVIEWING;
 
   logger.info('✅ Profile generation complete', {
     sessionId: session.sessionId,
     profileId,
-    stageTransition: `${oldStage} → ${STAGES.PROFILE_REVIEW}`,
+    stageTransition: `${oldStage} → ${STAGES.REVIEWING}`,
     hasProfileUrl: !!profileUrl,
     profileStatus: generatedProfile.status,
     photoCount: allPhotos.length
@@ -562,6 +568,7 @@ async function executeGenerateProfile(action, session) {
     action: 'profile_generated',
     profile: generatedProfile,
     profileUrl: profileUrl,
+    broadcastMessage: `here's your profile: ${profileUrl}`,
     message: 'Profile successfully generated and ready for review'
   };
 }
@@ -577,11 +584,11 @@ async function executeCommitProfile(action, session) {
   });
 
   // Validate that we're in the right stage
-  if (session.stage !== STAGES.PROFILE_REVIEW) {
+  if (session.stage !== STAGES.REVIEWING) {
     logger.error('❌ Invalid stage for profile commit', {
       sessionId: session.sessionId,
       currentStage: session.stage,
-      requiredStage: STAGES.PROFILE_REVIEW
+      requiredStage: STAGES.REVIEWING
     });
     return {
       success: false,
@@ -621,13 +628,13 @@ async function executeCommitProfile(action, session) {
 
   // Update stage
   const oldStage = session.stage;
-  session.stage = STAGES.PROFILE_COMMITTED;
+  session.stage = STAGES.FINALIZED;
 
   logger.info('✅ Profile committed successfully', {
     sessionId: session.sessionId,
     profileId,
     profileName,
-    stageTransition: `${oldStage} → ${STAGES.PROFILE_COMMITTED}`,
+    stageTransition: `${oldStage} → ${STAGES.FINALIZED}`,
     committedAt: session.committedProfile.committedAt,
     hasProfileCard: !!session.committedProfile.profileCardImage
   });
@@ -657,11 +664,11 @@ async function executeDailyDrop(action, session) {
   });
 
   // Validate that profile is committed
-  if (session.stage !== STAGES.PROFILE_COMMITTED) {
+  if (session.stage !== STAGES.FINALIZED) {
     logger.error('❌ Invalid stage for daily drop', {
       sessionId: session.sessionId,
       currentStage: session.stage,
-      requiredStage: STAGES.PROFILE_COMMITTED
+      requiredStage: STAGES.FINALIZED
     });
     return {
       success: false,
@@ -723,6 +730,152 @@ async function executeDailyDrop(action, session) {
     action: 'daily_drop',
     profiles: profilesWithDescriptions,
     message: 'Daily drop profiles selected!'
+  };
+}
+
+/**
+ * Execute show_confirmation action (ATOMIC)
+ * Builds profile recap, sends template, and transitions to CONFIRMING stage
+ * This eliminates the need for LLM to coordinate multiple actions
+ */
+async function executeShowConfirmation(action, session) {
+  logger.info('🔍 Starting show_confirmation (atomic action)', {
+    sessionId: session.sessionId,
+    currentStage: session.stage
+  });
+
+  // Validate current stage - should be in COLLECTING
+  if (session.stage !== STAGES.COLLECTING && session.stage !== STAGES.CONFIRMING) {
+    logger.warn('show_confirmation called from unexpected stage', {
+      sessionId: session.sessionId,
+      currentStage: session.stage,
+      expectedStage: STAGES.COLLECTING
+    });
+  }
+
+  // Build profile summary (reuse logic from action-instructions.js)
+  const { buildProfileSummary } = require('../prompts/action-instructions');
+  const profileSummary = buildProfileSummary(session.profileSchema || {});
+
+  logger.debug('Profile summary built', {
+    sessionId: session.sessionId,
+    summaryLength: profileSummary.length,
+    summaryPreview: profileSummary.substring(0, 100)
+  });
+
+  // Update stage to CONFIRMING
+  const oldStage = session.stage;
+  session.stage = STAGES.CONFIRMING;
+
+  logger.info('✅ show_confirmation complete (atomic)', {
+    sessionId: session.sessionId,
+    stageTransition: `${oldStage} → ${STAGES.CONFIRMING}`,
+    templatePrepared: true,
+    summaryGenerated: true
+  });
+
+  // Return template info for server to send
+  return {
+    success: true,
+    action: 'confirmation_shown',
+    oldStage,
+    newStage: STAGES.CONFIRMING,
+    templateType: 'profile_confirmation',
+    templateVariables: {
+      '1': profileSummary
+    },
+    message: 'Profile confirmation template prepared and stage updated'
+  };
+}
+
+/**
+ * Execute finalize_profile action (ATOMIC)
+ * Commits profile, triggers daily_drop, and transitions to FINALIZED stage
+ * This eliminates the need for LLM to coordinate multiple actions
+ */
+async function executeFinalizeProfile(action, session) {
+  logger.info('✨ Starting finalize_profile (atomic action)', {
+    sessionId: session.sessionId,
+    currentStage: session.stage,
+    hasGeneratedProfile: !!session.generatedProfile
+  });
+
+  // Validate that we're in the right stage
+  if (session.stage !== STAGES.REVIEWING) {
+    logger.error('❌ Invalid stage for finalize_profile', {
+      sessionId: session.sessionId,
+      currentStage: session.stage,
+      requiredStage: STAGES.REVIEWING
+    });
+    return {
+      success: false,
+      error: `Can only finalize profile from ${STAGES.REVIEWING} stage`
+    };
+  }
+
+  // Validate that profile has been generated
+  if (!session.generatedProfile) {
+    logger.error('❌ No generated profile to finalize', {
+      sessionId: session.sessionId
+    });
+    return {
+      success: false,
+      error: 'No generated profile found. Generate profile first.'
+    };
+  }
+
+  // Step 1: Commit the profile
+  logger.info('💾 Committing profile', {
+    sessionId: session.sessionId,
+    profileId: session.generatedProfile.id
+  });
+
+  session.generatedProfile.status = 'committed';
+  session.generatedProfile.committedAt = new Date().toISOString();
+  session.committedProfile = { ...session.generatedProfile };
+
+  // Step 2: Update stage to FINALIZED
+  const oldStage = session.stage;
+  session.stage = STAGES.FINALIZED;
+
+  logger.info('✅ Profile committed', {
+    sessionId: session.sessionId,
+    profileId: session.generatedProfile.id,
+    stageTransition: `${oldStage} → ${STAGES.FINALIZED}`
+  });
+
+  // Step 3: Trigger daily drop
+  logger.info('💌 Triggering daily drop', {
+    sessionId: session.sessionId
+  });
+
+  const dailyDropResult = await executeDailyDrop({}, session);
+
+  if (!dailyDropResult.success) {
+    logger.error('❌ Daily drop failed during finalize', {
+      sessionId: session.sessionId,
+      error: dailyDropResult.error
+    });
+    // Don't fail the entire finalization, but log it
+  }
+
+  logger.info('✅ finalize_profile complete (atomic)', {
+    sessionId: session.sessionId,
+    profileCommitted: true,
+    dailyDropTriggered: dailyDropResult.success,
+    matchCount: dailyDropResult.profiles?.length || 0,
+    stageTransition: `${oldStage} → ${STAGES.FINALIZED}`
+  });
+
+  // Return matches for LLM to present
+  return {
+    success: true,
+    action: 'profile_finalized',
+    oldStage,
+    newStage: STAGES.FINALIZED,
+    profileId: session.generatedProfile.id,
+    dailyDropMatches: dailyDropResult.profiles || [],
+    message: 'Profile committed and daily drop triggered'
   };
 }
 
@@ -822,10 +975,26 @@ function parseAIResponse(aiResponse) {
     // New format: pure actions (message field deprecated)
     // Old format: message + actions (still supported for backward compat)
     if (parsed.actions && Array.isArray(parsed.actions)) {
+      const reasoningText = typeof parsed.reasoning === 'string'
+        ? parsed.reasoning.trim()
+        : '';
+
+      if (!reasoningText) {
+        logger.warn('AI response missing reasoning field or empty string', {
+          hasReasoningKey: Object.prototype.hasOwnProperty.call(parsed, 'reasoning'),
+          actionCount: parsed.actions.length
+        });
+      } else if (reasoningText.length > 160) {
+        logger.debug('AI reasoning is longer than expected', {
+          reasoningLength: reasoningText.length,
+          preview: reasoningText.slice(0, 120)
+        });
+      }
+
       return {
         message: parsed.message || '', // Empty if using new pure-actions format
         actions: parsed.actions,
-        reasoning: parsed.reasoning || ''
+        reasoning: reasoningText
       };
     }
 
@@ -845,22 +1014,24 @@ function parseAIResponse(aiResponse) {
       };
     }
 
-    // If structure is completely wrong, log and create fallback send_message action
-    logger.warn('AI JSON response missing required fields', {
+    // If structure is completely wrong, log error and return error message
+    logger.error('🚨 AI JSON response missing required "actions" array wrapper', {
       parsedKeys: Object.keys(parsed),
-      responsePreview: aiResponse.substring(0, 200)
+      responsePreview: aiResponse.substring(0, 200),
+      note: 'AI must return {"actions": [...], "reasoning": "..."} format'
     });
 
+    // Return error action instead of broadcasting malformed JSON
     return {
-      message: aiResponse,
+      message: 'Sorry, I had a formatting issue. Let me try that again!',
       actions: [
         {
           type: ACTION_TYPES.SEND_MESSAGE,
           target: 'all',
-          message: aiResponse
+          message: 'Sorry, I had a formatting issue. Let me try that again!'
         }
       ],
-      reasoning: 'Malformed response - wrapped in send_message'
+      reasoning: 'Malformed response - AI did not wrap actions in "actions" array'
     };
   } catch (error) {
     // Not valid JSON, wrap in send_message action

@@ -227,39 +227,34 @@ twilioClient.messages.create({
 
 ## Stage-Based Flow
 
-The conversation progresses through **7 stages**:
+The core conversation progresses through **5 stages**, with an optional holding state when surfacing matches:
 
 ```
 1. INTRODUCTION
-   ├─ Welcome user
-   └─ Share session code for friends to join
+   ├─ Welcome the group
+   └─ Clarify who we're building the profile for and set expectations
         ↓
 2. PROFILE_CREATION
-   ├─ Collect ALL profile fields (name, age, gender, photo, bio, etc.)
+   ├─ Collect profile fields (name, age, gender, photo, bio, etc.)
    ├─ Ask ONE question at a time
    └─ Accept answers from ANY participant
         ↓
 3. PROFILE_CONFIRMATION
-   ├─ Show summary of collected data
-   └─ Ask for approval
+   ├─ Show a quick summary of collected data
+   └─ Offer the template confirmation or chance to tweak
         ↓
-4. PROFILE_GENERATION
-   ├─ Generate profile card image
-   ├─ Create shareable URL
-   └─ Auto-transition (no wait)
-        ↓
-5. PROFILE_REVIEW
-   ├─ Show generated profile
+4. PROFILE_REVIEW
+   ├─ Share the generated profile
    ├─ Allow iteration (change fields → regenerate)
    └─ Wait for explicit approval
         ↓
-6. PROFILE_COMMITTED
-   ├─ Finalize profile
-   ├─ IMMEDIATELY do daily_drop
-   └─ Present 2 random profiles for voting
-        ↓
-7. FETCHING_PROFILES
-   └─ End state (conversation complete)
+5. PROFILE_COMMITTED
+   ├─ Finalize the profile
+   ├─ Trigger daily drop to tee up matches
+   └─ Present next steps and keep the energy up
+
+Optional: FETCHING_PROFILES
+   └─ Temporary state while presenting matches or daily drops
 ```
 
 **Stage transitions are controlled by**:

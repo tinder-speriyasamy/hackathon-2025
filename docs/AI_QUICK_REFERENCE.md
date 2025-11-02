@@ -33,14 +33,21 @@ const STAGES = {
   INTRODUCTION: 'introduction',           // Welcome, share session code
   PROFILE_CREATION: 'profile_creation',   // Collect all fields
   PROFILE_CONFIRMATION: 'profile_confirmation', // Show summary, get approval
-  PROFILE_GENERATION: 'profile_generation',     // Generate card & URL
   PROFILE_REVIEW: 'profile_review',             // Show profile, allow iteration
   PROFILE_COMMITTED: 'profile_committed',       // Finalized, do daily drop
-  FETCHING_PROFILES: 'fetching_profiles'        // End state
+  FETCHING_PROFILES: 'fetching_profiles'        // Optional holding state for match surfacing
 };
 ```
 
-**Flow**: `INTRODUCTION` → `PROFILE_CREATION` → `PROFILE_CONFIRMATION` → `PROFILE_GENERATION` → `PROFILE_REVIEW` → `PROFILE_COMMITTED` → `FETCHING_PROFILES`
+const CORE_STAGE_FLOW = [
+  STAGES.INTRODUCTION,
+  STAGES.PROFILE_CREATION,
+  STAGES.PROFILE_CONFIRMATION,
+  STAGES.PROFILE_REVIEW,
+  STAGES.PROFILE_COMMITTED
+];
+
+**Flow**: `INTRODUCTION` → `PROFILE_CREATION` → `PROFILE_CONFIRMATION` → `PROFILE_REVIEW` → `PROFILE_COMMITTED`
 
 ---
 
