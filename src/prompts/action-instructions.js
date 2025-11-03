@@ -70,21 +70,25 @@ const STAGE_TIPS = {
 • Once confirmed, transition with {"type":"update_stage","stage":"${STAGES.COLLECTING}"}.`,
 
   [STAGES.COLLECTING]: `• Ask ONE question at a time, pairing acknowledgment + next question in single send_message.
-• Immediately store each answer with update_profile_schema.
-• When you have enough data (at minimum: name, age, photo), call the ATOMIC action {"type":"show_confirmation"}.
-• NEVER manually send templates or manually call update_stage to ${STAGES.CONFIRMING}.
-• The show_confirmation action does everything: builds recap + sends template + transitions stage automatically.`,
+• Store each answer with update_profile_schema.
+• As user is responding freeform from mobile, if they respond with shorthand answers/typos, like 170 for 170cm or 5.4 for 5'4", infer the answer and store the correct value. Do this for all fields
+• When you have enough basic data (at minimum: name, age, photo), ASK if they're ready to respond to prompts (include friends in the invitation if there are multiple participants in the session).
+• Ask follow questions to get more details if you can't infer the answer from the freeform response. Once confirmed, call update_profile_schema to store the answer.
+• If they say YES to prompts: Ask the three prompts one at a time (use the prompts from the schema checklist below).
+• If they say NO to prompts: Call the ATOMIC action {"type":"show_confirmation"} to proceed to confirmation.
+• The show_confirmation action does everything: builds recap + sends template to confirm + transitions stage automatically.`,
 
   [STAGES.CONFIRMING]: `• You arrive here because show_confirmation was called - template already sent to user.
 • WAIT for user button response. Do NOT resend template unless explicitly requested.
-• User clicks "Yes, generate! ✨" or says positive confirmation: Call {"type":"generate_profile"} (this is atomic: generates + sends URL + transitions to ${STAGES.REVIEWING}).
-• User clicks "Make changes": Ask what to change, update with update_profile_schema, then call {"type":"show_confirmation"} again to refresh.`,
+• User clicks button or types "Yes, generate! ✨" (or any variation like "yes generate", "generate", "yes!", "✨") → IMMEDIATELY call {"type":"generate_profile"} (this is atomic: generates + sends URL + transitions to ${STAGES.REVIEWING})
+• IMPORTANT: Detect button clicks generously - any affirmative response about generating should trigger generate_profile
+• User clicks "Make changes" or requests edits: Ask what to change, update with update_profile_schema, then call {"type":"show_confirmation"} again to refresh.`,
 
   [STAGES.REVIEWING]: `• You arrive here because generate_profile was called - profile URL already sent to user.
-• WAIT for user feedback on the generated profile.
-• User says "perfect", "love it", or approves: Call {"type":"finalize_profile"} (this is atomic: commits + triggers daily_drop + transitions to ${STAGES.FINALIZED} + returns matches).
-• User requests edits: Update with update_profile_schema, then call {"type":"generate_profile"} again to regenerate.
-• NEVER manually call commit_profile, daily_drop, or update_stage - finalize_profile does it all.`,
+• User expresses approval in ANY form (be generous with detection): "perfect", "love it", "looks good", "looks great", "amazing", "awesome", "nice", "great", emojis like ✅/👍/🔥, "let's do it", "let's go", "ship it", "good to go", "ready", or similar positive sentiment → IMMEDIATELY call {"type":"finalize_profile"}
+• finalize_profile is atomic: commits + triggers daily_drop + transitions to ${STAGES.FINALIZED} + returns matches
+• User requests edits or changes: Update with update_profile_schema, then call {"type":"generate_profile"} again to regenerate.
+• DON'T manually call commit_profile, daily_drop, or update_stage - finalize_profile does it all.`,
 
   [STAGES.FINALIZED]: `• You arrive here because finalize_profile was called - profile is committed and daily drop triggered.
 • Check "Daily Drop:" section above - if matches exist, present them immediately with enthusiasm.
@@ -158,10 +162,6 @@ function getActionInstructions(currentStage, participants, profileSchema = {}, s
 
 **CRITICAL - Atomic Actions Eliminate Coordination:**
 - NEVER manually send templates with send_template_message - atomic actions handle this.
-- NEVER manually coordinate multiple actions - use atomic actions instead:
-  - show_confirmation: Single action that builds recap + sends template + transitions stage
-  - generate_profile: Single action that generates + sends URL + transitions stage
-  - finalize_profile: Single action that commits + daily_drop + transitions stage + returns matches
 - Templates are sent automatically by atomic actions - you just call the action.
 - After atomic action completes, WAIT for user response before proceeding.
 
@@ -182,11 +182,6 @@ function getActionInstructions(currentStage, participants, profileSchema = {}, s
 4. show_confirmation — (ATOMIC) Builds profile recap + sends template + transitions to CONFIRMING. Call when ready to show recap.
 5. generate_profile — (ATOMIC) Generates profile + sends URL + transitions to REVIEWING. Needs name, age, photo.
 6. finalize_profile — (ATOMIC) Commits + triggers daily_drop + transitions to FINALIZED + returns matches. Call on final approval.
-
-**Legacy Actions** (don't use these - atomic actions replace them):
-- send_template_message — DON'T USE. Atomic actions send templates automatically.
-- commit_profile — DON'T USE. Use finalize_profile instead.
-- daily_drop — DON'T USE. Called automatically by finalize_profile.
 
 ### Stage Flow (in order)
 ${formatStageFlow()}

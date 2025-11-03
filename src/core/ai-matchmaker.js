@@ -490,13 +490,41 @@ async function generateAIResponse(sessionId, userMessage, phoneNumber) {
       return { role: m.role, content: m.content };
     });
 
+    // Build the complete messages array that will be sent to LLM
+    const llmMessages = [
+      { role: 'system', content: fullSystemPrompt },
+      ...formattedMessages
+    ];
+
+    // Log the COMPLETE prompt being sent to the LLM
+    logger.info('📤 COMPLETE LLM PROMPT - Messages Array', {
+      sessionId,
+      totalMessages: llmMessages.length,
+      systemMessageLength: fullSystemPrompt.length,
+      conversationMessageCount: formattedMessages.length
+    });
+
+    // Log each message in the array with full content
+    llmMessages.forEach((msg, index) => {
+      logger.info(`📨 Message ${index + 1}/${llmMessages.length}`, {
+        sessionId,
+        index: index,
+        role: msg.role,
+        contentLength: msg.content?.length || 0,
+        contentPreview: msg.content ? msg.content.substring(0, 200) + (msg.content.length > 200 ? '...' : '') : '[EMPTY]',
+        fullContent: msg.content // Log the ENTIRE content for debugging
+      });
+    });
+
+    logger.info('🔍 SYSTEM PROMPT (Full)', {
+      sessionId,
+      fullSystemPrompt: fullSystemPrompt // Complete system prompt
+    });
+
     // Track LLM timing
     const llmStartTime = Date.now();
 
-    const llmResult = await callLLM([
-      { role: 'system', content: fullSystemPrompt },
-      ...formattedMessages
-    ], {
+    const llmResult = await callLLM(llmMessages, {
       max_tokens: 4000,
       response_format: { type: "json_object" }
     });
@@ -913,8 +941,16 @@ Message: *join ${newSessionId}*
           profileUrl = result.profileUrl;
         }
 
-        // Capture broadcast message from action (e.g., generate_profile sends profile URL)
-        if (result.broadcastMessage) {
+        // Capture broadcast message(s) from action (e.g., generate_profile sends profile URL)
+        if (result.broadcastMessages && Array.isArray(result.broadcastMessages)) {
+          actionBroadcastMessages.push(...result.broadcastMessages);
+          logger.debug('Broadcast messages captured from action', {
+            actionType: action.type,
+            messageCount: result.broadcastMessages.length,
+            messages: result.broadcastMessages,
+            sessionId: currentSession.sessionId
+          });
+        } else if (result.broadcastMessage) {
           actionBroadcastMessages.push(result.broadcastMessage);
           logger.debug('Broadcast message captured from action', {
             actionType: action.type,
@@ -1040,6 +1076,9 @@ async function handleIdentifyPrimary(sessionId, message, phoneNumber, profileNam
       name: profileName || 'you',
       confirmedAt: new Date().toISOString()
     };
+    // Sync primary user name to profileSchema for consistency
+    if (!session.profileSchema) session.profileSchema = {};
+    session.profileSchema.name = profileName || 'you';
     session.stage = STAGES.CONFIRM_PRIMARY;
 
     // Save session with updated primary user
@@ -1148,6 +1187,9 @@ ${session.primaryUser.name}, let's start with you. What are you looking for in a
     if (session.primaryUser && session.primaryUser.name) {
       session.primaryUser.phoneNumber = phoneNumber;
       session.primaryUser.confirmedAt = new Date().toISOString();
+      // Sync primary user name to profileSchema for consistency
+      if (!session.profileSchema) session.profileSchema = {};
+      session.profileSchema.name = session.primaryUser.name;
       session.stage = STAGES.PROFILE_CREATION;
       await setSession(sessionId, session);
 
@@ -1172,6 +1214,9 @@ Alright ${session.primaryUser.name}, let's start! What are you looking for in a 
     if (session.primaryUser && session.primaryUser.name && !session.primaryUser.phoneNumber) {
       session.primaryUser.phoneNumber = phoneNumber;
       session.primaryUser.confirmedAt = new Date().toISOString();
+      // Sync primary user name to profileSchema for consistency
+      if (!session.profileSchema) session.profileSchema = {};
+      session.profileSchema.name = session.primaryUser.name;
       session.stage = STAGES.PROFILE_CREATION;
       await setSession(sessionId, session);
 

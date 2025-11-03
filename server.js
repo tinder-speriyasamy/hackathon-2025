@@ -602,65 +602,6 @@ app.post('/webhooks/sms', async (req, res) => {
       }
 
       // Check if AI wants to send a template message
-      logger.debug('Checking for template message', {
-        hasTemplateType: !!result.templateType,
-        templateType: result.templateType,
-        sessionId: result.sessionId
-      });
-
-      if (result.templateType) {
-        logger.info('📋 Sending template message', {
-          sessionId: result.sessionId,
-          templateType: result.templateType,
-          variables: result.templateVariables
-        });
-
-        // Map template types to ContentSids from environment
-        const templateSids = {
-          'profile_confirmation': process.env.TWILIO_TEMPLATE_PROFILE_CONFIRMATION,
-          'profile_review': process.env.TWILIO_TEMPLATE_PROFILE_REVIEW
-        };
-
-        const contentSid = templateSids[result.templateType];
-
-        if (!contentSid) {
-          logger.error('Template ContentSid not configured', {
-            templateType: result.templateType,
-            availableTemplates: Object.keys(templateSids)
-          });
-          // Fallback to regular message
-        } else {
-          // Send template to all participants
-          for (const phoneNumber of result.participants) {
-            try {
-              await twilioClient.messages.create({
-                from: process.env.TWILIO_WHATSAPP_NUMBER,
-                to: `whatsapp:${phoneNumber}`,
-                contentSid: contentSid,
-                contentVariables: JSON.stringify(result.templateVariables || {})
-              });
-
-              logger.info('✅ Template message sent', {
-                phoneNumber,
-                sessionId: result.sessionId,
-                templateType: result.templateType
-              });
-            } catch (error) {
-              logger.error('Failed to send template message', {
-                phoneNumber,
-                templateType: result.templateType,
-                error: error.message
-              });
-            }
-          }
-
-          // Template sent, skip regular message broadcast
-          res.type('text/xml');
-          res.send(twiml.toString());
-          return;
-        }
-      }
-
       // Collect all messages to broadcast (from send_message actions, action broadcasts, or legacy result.response)
       const messagesToBroadcast = [];
 
@@ -797,6 +738,54 @@ app.post('/webhooks/sms', async (req, res) => {
 
       // Note: Profile URL is now sent via actionBroadcastMessages (broadcastMessage from generate_profile action)
       // No need for separate profile URL sending logic here
+
+      // After all broadcasts, send template if requested
+      if (result.templateType) {
+        logger.info('📋 Sending template message after broadcasts', {
+          sessionId: result.sessionId,
+          templateType: result.templateType,
+          variables: result.templateVariables
+        });
+
+        // Map template types to ContentSids from environment
+        const templateSids = {
+          'profile_confirmation': process.env.TWILIO_TEMPLATE_PROFILE_CONFIRMATION,
+          'profile_review': process.env.TWILIO_TEMPLATE_PROFILE_REVIEW
+        };
+
+        const contentSid = templateSids[result.templateType];
+
+        if (!contentSid) {
+          logger.error('Template ContentSid not configured', {
+            templateType: result.templateType,
+            availableTemplates: Object.keys(templateSids)
+          });
+        } else {
+          // Send template to all participants
+          for (const phoneNumber of result.participants) {
+            try {
+              await twilioClient.messages.create({
+                from: process.env.TWILIO_WHATSAPP_NUMBER,
+                to: `whatsapp:${phoneNumber}`,
+                contentSid: contentSid,
+                contentVariables: JSON.stringify(result.templateVariables || {})
+              });
+
+              logger.info('✅ Template message sent', {
+                phoneNumber,
+                sessionId: result.sessionId,
+                templateType: result.templateType
+              });
+            } catch (error) {
+              logger.error('Failed to send template message', {
+                phoneNumber,
+                templateType: result.templateType,
+                error: error.message
+              });
+            }
+          }
+        }
+      }
 
     } catch (error) {
       logger.error('Error processing AI response', error);

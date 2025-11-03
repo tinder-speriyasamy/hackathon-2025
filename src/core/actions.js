@@ -568,7 +568,16 @@ async function executeGenerateProfile(action, session) {
     action: 'profile_generated',
     profile: generatedProfile,
     profileUrl: profileUrl,
-    broadcastMessage: `here's your profile: ${profileUrl}`,
+    // Send three separate messages for proper Open Graph rendering:
+    // 1. Intro text, 2. URL only (triggers OG preview), 3. Template with buttons and message
+    broadcastMessages: [
+      "here's your profile, take a look!",
+      profileUrl  // URL in its own message to trigger WhatsApp Open Graph preview
+    ],
+    templateType: 'profile_review',
+    templateVariables: {
+      '1': 'how do you like it?'
+    },
     message: 'Profile successfully generated and ready for review'
   };
 }
@@ -867,14 +876,44 @@ async function executeFinalizeProfile(action, session) {
     stageTransition: `${oldStage} → ${STAGES.FINALIZED}`
   });
 
-  // Return matches for LLM to present
+  // Step 4: Build broadcast messages for daily drop presentation
+  const userName = session.primaryUser?.name || session.profileSchema?.name || 'there';
+  const profiles = dailyDropResult.profiles || [];
+  const broadcastMessages = [];
+
+  if (profiles.length > 0) {
+    // Message 1: Hype intro with acknowledgment
+    broadcastMessages.push(
+      `${userName}, your profile is live and you're in the daily drop! ready for some fresh matches? here's who's up today:`
+    );
+
+    // Message 2: Numbered list with profiles
+    const profileList = profiles.map((profile, index) => {
+      return `${index + 1}. ${profile.name}, ${profile.age} — ${profile.description}\n   ${profile.profileUrl}`;
+    }).join('\n\n');
+    broadcastMessages.push(profileList);
+
+    // Message 3: Choice prompt
+    const choiceOptions = profiles.length === 2 ? '1, 2, both, or neither' :
+                          profiles.length === 1 ? 'yes or no' :
+                          profiles.map((_, i) => i + 1).join(', ') + ', all, or none';
+    broadcastMessages.push(`which one catches your eye? just reply with ${choiceOptions}`);
+  } else {
+    // No matches - just acknowledgment
+    broadcastMessages.push(
+      `${userName}, your profile is live and you're in the daily drop! we'll send fresh matches your way soon.`
+    );
+  }
+
+  // Return with broadcast messages for automatic sending
   return {
     success: true,
     action: 'profile_finalized',
     oldStage,
     newStage: STAGES.FINALIZED,
     profileId: session.generatedProfile.id,
-    dailyDropMatches: dailyDropResult.profiles || [],
+    dailyDropMatches: profiles,
+    broadcastMessages,  // Automatic message sending (3-message pattern)
     message: 'Profile committed and daily drop triggered'
   };
 }
